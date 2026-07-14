@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cesium 双屏渲染联动 Demo</title>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.143/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.143/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+</head>
+<body>
+
+  <!-- 顶部工具栏 -->
+  <div id="toolbar">
+    <span class="title">Cesium 双屏渲染联动</span>
+
+    <div class="toolbar-group">
+      <button id="btn-camera-sync">相机联动: 开</button>
+    </div>
+
+    <div class="toolbar-divider"></div>
+
+    <div class="toolbar-group">
+      <label>右屏模式</label>
+      <select id="select-scene-mode">
+        <option value="3">3D</option>
+        <option value="2">2D</option>
+        <option value="1">Columbus View</option>
+      </select>
+    </div>
+
+    <div class="toolbar-divider"></div>
+
+    <div class="toolbar-group">
+      <label>影像图层</label>
+      <select id="select-imagery">
+        <option value="osm" selected>OpenStreetMap</option>
+        <option value="arcgis">ArcGIS 卫星影像</option>
+        <option value="ion-default">Cesium Ion（需Token）</option>
+      </select>
+    </div>
+
+    <div class="toolbar-divider"></div>
+
+    <div class="toolbar-group">
+      <button id="btn-load-demo">加载示例数据</button>
+      <button id="btn-clear">清除实体</button>
+    </div>
+
+    <div class="toolbar-divider"></div>
+
+    <div class="toolbar-group">
+      <input id="input-token" type="text" placeholder="Cesium Ion Token（可选）" style="width:180px;font-size:11px;padding:4px 8px;border:1px solid rgba(255,255,255,0.15);border-radius:4px;background:rgba(255,255,255,0.08);color:#e0e0e0;outline:none;">
+      <button id="btn-set-token">应用 Token</button>
+    </div>
+  </div>
+
+  <!-- 主容器：双屏 -->
+  <div id="main-container">
+    <div id="panel-left" class="viewer-panel">
+      <span class="panel-label">Viewer A · 3D</span>
+      <div id="viewer-a" class="cesium-container"></div>
+    </div>
+
+    <div id="divider"></div>
+
+    <div id="panel-right" class="viewer-panel">
+      <span class="panel-label">Viewer B · 3D / 2D</span>
+      <div id="viewer-b" class="cesium-container"></div>
+    </div>
+  </div>
+
+  <!-- 飞行定位面板 -->
+  <div id="flyto-panel"></div>
+
+  <!-- 底部状态栏 -->
+  <div id="status-bar">
+    <div class="coord-info">
+      <span id="coord-info">经度: --  纬度: --  高程: --</span>
+    </div>
+    <span id="fps-info">FPS: --</span>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

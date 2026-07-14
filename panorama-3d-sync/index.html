@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>360全景 ↔ BIM 3D场景 联动 Demo</title>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.143/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.143/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <link href="style.css" rel="stylesheet">
+</head>
+<body>
+
+  <!-- 顶部工具栏 -->
+  <div id="toolbar">
+    <span class="title">360全景 ↔ BIM 3D场景 联动</span>
+
+    <div class="toolbar-group">
+      <button id="btn-sync-toggle">视角联动: 开</button>
+    </div>
+
+    <div class="toolbar-divider"></div>
+
+    <div class="toolbar-group">
+      <label>全景场景</label>
+      <select id="select-panorama">
+        <option value="default" selected>默认全景</option>
+        <option value="outdoor">户外场景</option>
+        <option value="indoor">室内场景</option>
+      </select>
+    </div>
+
+    <div class="toolbar-divider"></div>
+
+    <div class="toolbar-group">
+      <label>影像图层</label>
+      <select id="select-imagery">
+        <option value="osm" selected>OpenStreetMap</option>
+        <option value="arcgis">ArcGIS 卫星影像</option>
+      </select>
+    </div>
+
+    <div class="toolbar-divider"></div>
+
+    <div class="toolbar-group">
+      <button id="btn-reset-view">重置视角</button>
+      <button id="btn-overview">俯瞰建筑</button>
+      <button id="btn-fly-indoor">飞入室内</button>
+    </div>
+
+    <div class="toolbar-divider"></div>
+
+    <div class="toolbar-group">
+      <button id="btn-indoor-mode">室内模式: 关</button>
+      <button id="btn-bounds-vis">边界: 隐</button>
+    </div>
+
+    <div class="toolbar-divider"></div>
+
+    <div class="toolbar-group">
+      <input id="input-token" type="text" placeholder="Cesium Ion Token（可选）" style="width:180px;font-size:11px;padding:4px 8px;border:1px solid rgba(255,255,255,0.15);border-radius:4px;background:rgba(255,255,255,0.08);color:#e0e0e0;outline:none;">
+      <button id="btn-set-token">应用 Token</button>
+    </div>
+  </div>
+
+  <!-- 主容器：双屏 -->
+  <div id="main-container">
+    <div id="panel-left" class="viewer-panel">
+      <span class="panel-label">360° 全景视图</span>
+      <div id="panorama-container" class="render-container"></div>
+    </div>
+
+    <div id="divider"></div>
+
+    <div id="panel-right" class="viewer-panel">
+      <span class="panel-label">Cesium BIM 3D 场景</span>
+      <div id="cesium-container" class="render-container"></div>
+    </div>
+  </div>
+
+  <!-- 全景热点面板 -->
+  <div id="hotspot-panel"></div>
+
+  <!-- 底部状态栏 -->
+  <div id="status-bar">
+    <div class="coord-info">
+      <span id="pano-info">全景: heading --° pitch --°</span>
+      <span class="info-divider">|</span>
+      <span id="cesium-info">Cesium: heading --° pitch --°</span>
+      <span class="info-divider">|</span>
+      <span id="mode-info">模式: 普通</span>
+    </div>
+    <span id="fps-info">FPS: --</span>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

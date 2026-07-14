@@ -1,0 +1,245 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #1a1a2e;
+  color: #e0e0e0;
+}
+
+/* ── 顶部工具栏 ── */
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 48px;
+  padding: 0 16px;
+  background: linear-gradient(135deg, #16213e, #0f3460);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  z-index: 100;
+  flex-shrink: 0;
+}
+
+#toolbar .title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: #e0e0e0;
+  margin-right: auto;
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-group label {
+  font-size: 12px;
+  color: #aaa;
+  white-space: nowrap;
+}
+
+.toolbar-group select,
+.toolbar-group button {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e0e0e0;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  outline: none;
+}
+
+.toolbar-group select:hover,
+.toolbar-group button:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.toolbar-group button.active {
+  background: #e94560;
+  border-color: #e94560;
+  color: #fff;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* ── 主容器：双屏分屏 ── */
+#main-container {
+  display: flex;
+  width: 100%;
+  height: calc(100vh - 48px);
+  position: relative;
+}
+
+.viewer-panel {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+}
+
+#panel-left {
+  flex: 1 1 50%;
+  min-width: 200px;
+}
+
+#panel-right {
+  flex: 1 1 50%;
+  min-width: 200px;
+}
+
+.viewer-panel .panel-label {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 14px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  color: #ccc;
+  z-index: 10;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.cesium-container {
+  width: 100%;
+  height: 100%;
+}
+
+/* ── 分割线拖拽条 ── */
+#divider {
+  width: 5px;
+  cursor: col-resize;
+  background: rgba(255, 255, 255, 0.06);
+  transition: background 0.2s;
+  z-index: 50;
+  flex-shrink: 0;
+}
+
+#divider:hover,
+#divider.dragging {
+  background: #e94560;
+}
+
+/* ── 底部信息栏 ── */
+#status-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  background: rgba(15, 52, 96, 0.9);
+  backdrop-filter: blur(8px);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 11px;
+  color: #999;
+  z-index: 100;
+}
+
+#status-bar .coord-info {
+  display: flex;
+  gap: 16px;
+}
+
+/* ── 飞行定位按钮组 ── */
+#flyto-panel {
+  position: fixed;
+  bottom: 36px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 90;
+}
+
+#flyto-panel button {
+  padding: 6px 14px;
+  font-size: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  background: rgba(22, 33, 62, 0.85);
+  backdrop-filter: blur(6px);
+  color: #ccc;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+  text-align: left;
+  white-space: nowrap;
+}
+
+#flyto-panel button:hover {
+  background: rgba(233, 69, 96, 0.7);
+  color: #fff;
+}
+
+/* ── Cesium 覆盖样式 ── */
+.cesium-viewer-bottom {
+  display: none !important;
+}
+
+.cesium-viewer .cesium-widget-credits {
+  display: none !important;
+}
+
+.cesium-viewer-toolbar {
+  position: absolute;
+  top: auto !important;
+  bottom: 36px !important;
+  right: 8px !important;
+}
+
+/* ── 响应式 ── */
+@media (max-width: 768px) {
+  #main-container {
+    flex-direction: column;
+  }
+
+  #divider {
+    width: 100%;
+    height: 5px;
+    cursor: row-resize;
+  }
+
+  #panel-left, #panel-right {
+    flex: 1 1 50%;
+    min-width: unset;
+    min-height: 150px;
+  }
+
+  #toolbar {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 6px 12px;
+    gap: 6px;
+  }
+
+  #flyto-panel {
+    flex-direction: row;
+    flex-wrap: wrap;
+    bottom: 36px;
+    right: 4px;
+    left: 4px;
+  }
+}
