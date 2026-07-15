@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Cesium 双屏渲染联动 Demo</title>
+  <title>Cesium 双屏对等联动 Demo</title>
   <script src="https://cesium.com/downloads/cesiumjs/releases/1.143/Build/Cesium/Cesium.js"></script>
   <link href="https://cesium.com/downloads/cesiumjs/releases/1.143/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
   <link href="style.css" rel="stylesheet">
@@ -12,32 +12,11 @@
 
   <!-- 顶部工具栏 -->
   <div id="toolbar">
-    <span class="title">Cesium 双屏渲染联动</span>
+    <span class="title">Cesium 双屏对等联动</span>
 
     <div class="toolbar-group">
-      <button id="btn-camera-sync">相机联动: 开</button>
-    </div>
-
-    <div class="toolbar-divider"></div>
-
-    <div class="toolbar-group">
-      <label>右屏模式</label>
-      <select id="select-scene-mode">
-        <option value="3">3D</option>
-        <option value="2">2D</option>
-        <option value="1">Columbus View</option>
-      </select>
-    </div>
-
-    <div class="toolbar-divider"></div>
-
-    <div class="toolbar-group">
-      <label>影像图层</label>
-      <select id="select-imagery">
-        <option value="osm" selected>OpenStreetMap</option>
-        <option value="arcgis">ArcGIS 卫星影像</option>
-        <option value="ion-default">Cesium Ion（需Token）</option>
-      </select>
+      <button id="btn-camera-sync" class="active">相机联动: 开</button>
+      <button id="btn-clock-sync" class="active">时钟联动: 开</button>
     </div>
 
     <div class="toolbar-divider"></div>
@@ -58,14 +37,42 @@
   <!-- 主容器：双屏 -->
   <div id="main-container">
     <div id="panel-left" class="viewer-panel">
-      <span class="panel-label">Viewer A · 3D</span>
+      <div class="panel-header">
+        <span class="panel-label">Viewer A</span>
+        <div class="panel-controls">
+          <select class="select-scene-mode" data-viewer="A">
+            <option value="3">3D</option>
+            <option value="2">2D</option>
+            <option value="1">Columbus</option>
+          </select>
+          <select class="select-imagery" data-viewer="A">
+            <option value="osm" selected>OSM</option>
+            <option value="arcgis">ArcGIS 卫星</option>
+            <option value="ion-default">Ion（需Token）</option>
+          </select>
+        </div>
+      </div>
       <div id="viewer-a" class="cesium-container"></div>
     </div>
 
     <div id="divider"></div>
 
     <div id="panel-right" class="viewer-panel">
-      <span class="panel-label">Viewer B · 3D / 2D</span>
+      <div class="panel-header">
+        <span class="panel-label">Viewer B</span>
+        <div class="panel-controls">
+          <select class="select-scene-mode" data-viewer="B">
+            <option value="3">3D</option>
+            <option value="2">2D</option>
+            <option value="1">Columbus</option>
+          </select>
+          <select class="select-imagery" data-viewer="B">
+            <option value="osm" selected>OSM</option>
+            <option value="arcgis">ArcGIS 卫星</option>
+            <option value="ion-default">Ion（需Token）</option>
+          </select>
+        </div>
+      </div>
       <div id="viewer-b" class="cesium-container"></div>
     </div>
   </div>
@@ -75,7 +82,8 @@
 
   <!-- 底部状态栏 -->
   <div id="status-bar">
-    <div class="coord-info">
+    <div class="status-left">
+      <span id="active-source-info" class="active-source-badge">活跃: --</span>
       <span id="coord-info">经度: --  纬度: --  高程: --</span>
     </div>
     <span id="fps-info">FPS: --</span>

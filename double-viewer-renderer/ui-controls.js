@@ -1,6 +1,8 @@
 /**
- * UIControls - UI 控件管理
- * 管理工具栏按钮、场景模式切换、影像图层切换、飞行定位面板。
+ * UIControls - 对等双屏 UI 控件管理
+ *
+ * 每个 Viewer 拥有独立的场景模式和影像图层控制，
+ * 联动开关和状态栏跟随 activeSource 动态切换。
  */
 export class UIControls {
   constructor(viewerA, viewerB, syncController, entityManager) {
@@ -9,61 +11,42 @@ export class UIControls {
     this._sync = syncController;
     this._entities = entityManager;
 
+    this._coordHandler = null;
+
     this._initToolbar();
+    this._initPanelControls();
     this._initFlyToPanel();
     this._initDividerDrag();
     this._initStatusBar();
+    this._initActiveSourceHighlight();
   }
 
   _initToolbar() {
-    // 相机联动开关
     const cameraSyncBtn = document.getElementById('btn-camera-sync');
-    cameraSyncBtn.classList.add('active');
     cameraSyncBtn.addEventListener('click', () => {
       const enabled = this._sync.toggleCameraSync();
       cameraSyncBtn.classList.toggle('active', enabled);
       cameraSyncBtn.textContent = enabled ? '相机联动: 开' : '相机联动: 关';
     });
 
-    // 场景模式切换（右屏）
-    const sceneModeSelect = document.getElementById('select-scene-mode');
-    sceneModeSelect.addEventListener('change', (e) => {
-      const mode = parseInt(e.target.value, 10);
-      this._viewerB.scene.morphTo2D(0);
-      switch (mode) {
-        case Cesium.SceneMode.SCENE3D:
-          this._viewerB.scene.morphTo3D(1);
-          break;
-        case Cesium.SceneMode.SCENE2D:
-          this._viewerB.scene.morphTo2D(1);
-          break;
-        case Cesium.SceneMode.COLUMBUS_VIEW:
-          this._viewerB.scene.morphToColumbusView(1);
-          break;
-      }
+    const clockSyncBtn = document.getElementById('btn-clock-sync');
+    clockSyncBtn.addEventListener('click', () => {
+      const enabled = this._sync.toggleClockSync();
+      clockSyncBtn.classList.toggle('active', enabled);
+      clockSyncBtn.textContent = enabled ? '时钟联动: 开' : '时钟联动: 关';
     });
 
-    // 影像图层切换
-    const imagerySelect = document.getElementById('select-imagery');
-    imagerySelect.addEventListener('change', (e) => {
-      const type = e.target.value;
-      this._switchImagery(type);
-    });
-
-    // 加载示例数据按钮
     const loadDemoBtn = document.getElementById('btn-load-demo');
     loadDemoBtn.addEventListener('click', () => {
       this._entities.clearAll();
       this._entities.loadDemoEntities();
     });
 
-    // 清除实体按钮
     const clearBtn = document.getElementById('btn-clear');
     clearBtn.addEventListener('click', () => {
       this._entities.clearAll();
     });
 
-    // Token 设置
     const tokenInput = document.getElementById('input-token');
     const tokenBtn = document.getElementById('btn-set-token');
     const existingToken = localStorage.getItem('cesium_ion_token');
@@ -78,7 +61,30 @@ export class UIControls {
     });
   }
 
-  _switchImagery(type) {
+  /**
+   * 每个 Viewer 面板内的独立控制：场景模式 + 影像图层
+   */
+  _initPanelControls() {
+    const sceneModeSelects = document.querySelectorAll('.select-scene-mode');
+    for (const select of sceneModeSelects) {
+      select.addEventListener('change', (e) => {
+        const viewerId = e.target.dataset.viewer;
+        const mode = parseInt(e.target.value, 10);
+        this._sync.switchSceneMode(viewerId, mode);
+      });
+    }
+
+    const imagerySelects = document.querySelectorAll('.select-imagery');
+    for (const select of imagerySelects) {
+      select.addEventListener('change', (e) => {
+        const viewerId = e.target.dataset.viewer;
+        const type = e.target.value;
+        this._switchImagery(type, viewerId);
+      });
+    }
+  }
+
+  _switchImagery(type, viewerId) {
     const createProvider = () => {
       switch (type) {
         case 'ion-default':
@@ -91,17 +97,13 @@ export class UIControls {
           return new Cesium.ArcGisMapServerImageryProvider({
             url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer',
           });
-        case 'stamen-terrain':
-          return new Cesium.OpenStreetMapImageryProvider({
-            url: 'https://tiles.stadiamaps.com/tiles/stamen_terrain/',
-          });
         default:
           return new Cesium.OpenStreetMapImageryProvider({
             url: 'https://tile.openstreetmap.org/',
           });
       }
     };
-    this._sync.switchImageryForBoth(createProvider);
+    this._sync.switchImagery(createProvider, viewerId);
   }
 
   _initFlyToPanel() {
@@ -117,7 +119,7 @@ export class UIControls {
     const panel = document.getElementById('flyto-panel');
     for (const loc of locations) {
       const btn = document.createElement('button');
-      btn.textContent = `📍 ${loc.name}`;
+      btn.textContent = loc.name;
       btn.addEventListener('click', () => {
         this._sync.flyTo(
           Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, loc.height),
@@ -174,34 +176,72 @@ export class UIControls {
     document.addEventListener('pointercancel', stopDrag);
   }
 
+  /**
+   * 状态栏：坐标和 FPS 跟随 activeSource 动态切换
+   */
   _initStatusBar() {
     const coordEl = document.getElementById('coord-info');
     const fpsEl = document.getElementById('fps-info');
+    const activeSourceEl = document.getElementById('active-source-info');
 
-    const handler = new Cesium.ScreenSpaceEventHandler(this._viewerA.scene.canvas);
-    handler.setInputAction((movement) => {
-      const ray = this._viewerA.camera.getPickRay(movement.endPosition);
-      if (!ray) return;
-      const cartesian = this._viewerA.scene.globe.pick(ray, this._viewerA.scene);
-      if (cartesian) {
-        const carto = Cesium.Cartographic.fromCartesian(cartesian);
-        const lon = Cesium.Math.toDegrees(carto.longitude).toFixed(5);
-        const lat = Cesium.Math.toDegrees(carto.latitude).toFixed(5);
-        const alt = carto.height.toFixed(1);
-        coordEl.textContent = `经度: ${lon}°  纬度: ${lat}°  高程: ${alt}m`;
+    const setupCoordTracking = (viewer) => {
+      if (this._coordHandler) {
+        this._coordHandler.destroy();
       }
-    }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+      this._coordHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+      this._coordHandler.setInputAction((movement) => {
+        const ray = viewer.camera.getPickRay(movement.endPosition);
+        if (!ray) return;
+        const cartesian = viewer.scene.globe.pick(ray, viewer.scene);
+        if (cartesian) {
+          const carto = Cesium.Cartographic.fromCartesian(cartesian);
+          const lon = Cesium.Math.toDegrees(carto.longitude).toFixed(5);
+          const lat = Cesium.Math.toDegrees(carto.latitude).toFixed(5);
+          const alt = carto.height.toFixed(1);
+          coordEl.textContent = `经度: ${lon}°  纬度: ${lat}°  高程: ${alt}m`;
+        }
+      }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+    };
+
+    setupCoordTracking(this._viewerA);
+
+    this._sync.onActiveSourceChange((sourceId) => {
+      const viewer = sourceId === 'A' ? this._viewerA : this._viewerB;
+      setupCoordTracking(viewer);
+      activeSourceEl.textContent = `活跃: Viewer ${sourceId}`;
+    });
 
     let lastTime = performance.now();
-    let frameCount = 0;
-    this._viewerA.scene.postRender.addEventListener(() => {
-      frameCount++;
+    let frameCountA = 0;
+    let frameCountB = 0;
+
+    this._viewerA.scene.postRender.addEventListener(() => { frameCountA++; });
+    this._viewerB.scene.postRender.addEventListener(() => { frameCountB++; });
+
+    setInterval(() => {
       const now = performance.now();
-      if (now - lastTime >= 1000) {
-        fpsEl.textContent = `FPS: ${frameCount}`;
-        frameCount = 0;
-        lastTime = now;
-      }
+      const elapsed = (now - lastTime) / 1000;
+      const source = this._sync.activeSource;
+      const fps = source === 'B'
+        ? Math.round(frameCountB / elapsed)
+        : Math.round(frameCountA / elapsed);
+      fpsEl.textContent = `FPS: ${fps}`;
+      frameCountA = 0;
+      frameCountB = 0;
+      lastTime = now;
+    }, 1000);
+  }
+
+  /**
+   * 活跃 Viewer 面板高亮
+   */
+  _initActiveSourceHighlight() {
+    const panelLeft = document.getElementById('panel-left');
+    const panelRight = document.getElementById('panel-right');
+
+    this._sync.onActiveSourceChange((sourceId) => {
+      panelLeft.classList.toggle('active-source', sourceId === 'A');
+      panelRight.classList.toggle('active-source', sourceId === 'B');
     });
   }
 }

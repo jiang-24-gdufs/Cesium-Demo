@@ -89,6 +89,8 @@ html, body {
   position: relative;
   height: 100%;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 #panel-left {
@@ -101,23 +103,62 @@ html, body {
   min-width: 200px;
 }
 
-.viewer-panel .panel-label {
+/* ── 每个 Viewer 的顶部控制栏 ── */
+.panel-header {
   position: absolute;
-  top: 8px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 3px 14px;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(6px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 14px;
-  font-size: 11px;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  z-index: 10;
+}
+
+.panel-header .panel-label {
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.5px;
   color: #ccc;
-  z-index: 10;
-  pointer-events: none;
   white-space: nowrap;
+}
+
+.panel-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.panel-controls select {
+  font-size: 11px;
+  padding: 3px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #ddd;
+  cursor: pointer;
+  outline: none;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.panel-controls select:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* 活跃 Viewer 高亮边框 */
+.viewer-panel.active-source {
+  outline: 2px solid #e94560;
+  outline-offset: -2px;
+}
+
+.viewer-panel.active-source .panel-label {
+  color: #e94560;
+  font-weight: 600;
 }
 
 .cesium-container {
@@ -159,9 +200,21 @@ html, body {
   z-index: 100;
 }
 
-#status-bar .coord-info {
+.status-left {
   display: flex;
+  align-items: center;
   gap: 16px;
+}
+
+.active-source-badge {
+  padding: 1px 8px;
+  border-radius: 3px;
+  background: rgba(233, 69, 96, 0.2);
+  border: 1px solid rgba(233, 69, 96, 0.4);
+  color: #e94560;
+  font-weight: 500;
+  font-size: 10px;
+  letter-spacing: 0.3px;
 }
 
 /* ── 飞行定位按钮组 ── */
@@ -241,5 +294,10 @@ html, body {
     bottom: 36px;
     right: 4px;
     left: 4px;
+  }
+
+  .panel-header {
+    flex-wrap: wrap;
+    gap: 4px;
   }
 }

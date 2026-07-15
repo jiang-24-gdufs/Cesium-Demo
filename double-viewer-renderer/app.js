@@ -1,4 +1,4 @@
-import { SyncController } from './sync-controller.js';
+import { PeerSyncController } from './sync-controller.js';
 import { EntityManager } from './entities.js';
 import { UIControls } from './ui-controls.js';
 
@@ -16,10 +16,6 @@ const savedToken = urlParams.get('token')
 
 Cesium.Ion.defaultAccessToken = savedToken;
 
-/**
- * 使用不依赖 Ion Token 的 OpenStreetMap 作为默认底图
- * 确保在没有有效 Token 的情况下也能正确显示地球影像
- */
 const baseImageryProvider = new Cesium.OpenStreetMapImageryProvider({
   url: 'https://tile.openstreetmap.org/',
 });
@@ -40,7 +36,7 @@ const viewerOptions = {
   creditContainer: document.createElement('div'),
 };
 
-// ── 创建双 Viewer ──
+// ── 创建对等双 Viewer ──
 const viewerA = new Cesium.Viewer('viewer-a', {
   ...viewerOptions,
   baseLayer: Cesium.ImageryLayer.fromProviderAsync(
@@ -59,13 +55,11 @@ const viewerB = new Cesium.Viewer('viewer-b', {
   ),
 });
 
-// 在默认底图之上叠加 OSM 瓦片，提供更高清的地图
 viewerA.imageryLayers.addImageryProvider(baseImageryProvider);
 viewerB.imageryLayers.addImageryProvider(
   new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' })
 );
 
-// 尝试加载 Ion 地形（如果 Token 有效）
 async function tryLoadTerrain(viewer) {
   try {
     const terrain = await Cesium.CesiumTerrainProvider.fromIonAssetId(1);
@@ -78,7 +72,6 @@ async function tryLoadTerrain(viewer) {
 tryLoadTerrain(viewerA);
 tryLoadTerrain(viewerB);
 
-// ── 加载 OSM 建筑 3D Tiles ──
 async function loadOSMBuildings() {
   try {
     const tilesetA = await Cesium.createOsmBuildingsAsync();
@@ -92,8 +85,8 @@ async function loadOSMBuildings() {
 
 loadOSMBuildings();
 
-// ── 初始化联动控制器 ──
-const syncController = new SyncController(viewerA, viewerB);
+// ── 初始化对等联动控制器 ──
+const syncController = new PeerSyncController(viewerA, viewerB);
 
 // ── 初始化实体管理器 ──
 const entityManager = new EntityManager(viewerA, viewerB);
@@ -101,23 +94,20 @@ const entityManager = new EntityManager(viewerA, viewerB);
 // ── 初始化 UI 控件 ──
 const uiControls = new UIControls(viewerA, viewerB, syncController, entityManager);
 
-// ── 设置初始视角（中国） ──
-viewerA.camera.setView({
+// ── 设置初始视角 ──
+const initialView = {
   destination: Cesium.Cartesian3.fromDegrees(104.0, 35.0, 8000000),
   orientation: {
     heading: 0,
     pitch: Cesium.Math.toRadians(-90),
     roll: 0,
   },
-});
+};
 
+viewerA.camera.setView(initialView);
 viewerB.camera.setView({
-  destination: Cesium.Cartesian3.fromDegrees(104.0, 35.0, 8000000),
-  orientation: {
-    heading: 0,
-    pitch: Cesium.Math.toRadians(-90),
-    roll: 0,
-  },
+  destination: initialView.destination.clone(),
+  orientation: { ...initialView.orientation },
 });
 
 // ── 默认加载示例数据 ──
@@ -131,4 +121,4 @@ window.setCesiumToken = (token) => {
   window.location.reload();
 };
 
-console.log('[DoubleViewerRenderer] 双屏渲染应用已启动');
+console.log('[DoubleViewerRenderer] 双屏对等联动应用已启动');
