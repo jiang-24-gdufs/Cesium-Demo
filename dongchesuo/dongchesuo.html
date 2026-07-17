@@ -1,0 +1,1382 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge,chrome=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
+    <title>动车所三维场景</title>
+    <link href="../Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+    <script type="text/javascript" src="../Build/Cesium/Cesium.js"></script>
+    <script src="../examples/webgl/js/supermap/SuperMap.Include.js"></script>
+    <style>
+        html, body, #cesiumContainer {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+        }
+
+        #toolbar {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+            background: rgba(38, 38, 38, 0.85);
+            padding: 10px 15px;
+            border-radius: 4px;
+            color: #fff;
+            font-size: 13px;
+            border: 1px solid #526f82;
+        }
+
+        #toolbar button {
+            padding: 6px 14px;
+            margin: 4px;
+            cursor: pointer;
+            background: #2ec5ad;
+            color: #fff;
+            border: none;
+            border-radius: 3px;
+            font-size: 13px;
+        }
+
+        #toolbar button:hover {
+            background: #26a08d;
+        }
+
+        #layerPanel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: rgba(38, 38, 38, 0.9);
+            padding: 12px 16px;
+            border-radius: 4px;
+            color: #fff;
+            font-size: 13px;
+            border: 1px solid #526f82;
+            max-height: 60vh;
+            overflow-y: auto;
+            min-width: 220px;
+        }
+
+        #layerPanel h4 {
+            margin: 0 0 10px 0;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #526f82;
+            color: #2ec5ad;
+            font-size: 14px;
+        }
+
+        #layerList {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        #layerList li {
+            padding: 6px 10px;
+            margin: 3px 0;
+            cursor: pointer;
+            border-radius: 3px;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        #layerList li:hover {
+            background: rgba(46, 197, 173, 0.3);
+        }
+
+        #layerList li .layer-visibility {
+            width: 14px;
+            height: 14px;
+            cursor: pointer;
+        }
+
+        #layerList li .layer-name {
+            flex: 1;
+            font-size: 12px;
+        }
+
+        #layerList li .layer-locate {
+            padding: 2px 8px;
+            background: #2ec5ad;
+            border: none;
+            border-radius: 2px;
+            color: #fff;
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        #layerList li .layer-locate:hover {
+            background: #26a08d;
+        }
+
+        #infoPanel {
+            display: none;
+            position: absolute;
+            bottom: 50px;
+            right: 20px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 20px;
+            border-radius: 6px;
+            max-width: 420px;
+            max-height: 400px;
+            overflow-y: auto;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            font-size: 13px;
+            color: #333;
+        }
+
+        #infoPanel h3 {
+            margin: 0 0 10px 0;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #2ec5ad;
+            color: #2ec5ad;
+        }
+
+        #infoPanel table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        #infoPanel table td {
+            padding: 4px 8px;
+            border-bottom: 1px solid #eee;
+            word-break: break-all;
+        }
+
+        #infoPanel table td:first-child {
+            font-weight: bold;
+            white-space: nowrap;
+            color: #555;
+        }
+
+        #closeInfo {
+            position: absolute;
+            top: 8px;
+            right: 12px;
+            cursor: pointer;
+            font-size: 18px;
+            color: #999;
+            line-height: 1;
+        }
+
+        #closeInfo:hover {
+            color: #333;
+        }
+
+        /* SQL 查询面板 */
+        #queryPanel {
+            display: none;
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1001;
+            background: rgba(38, 38, 38, 0.95);
+            padding: 15px 20px;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 13px;
+            border: 1px solid #526f82;
+            min-width: 480px;
+            max-width: 600px;
+        }
+
+        #queryPanel h4 {
+            margin: 0 0 12px 0;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #526f82;
+            color: #2ec5ad;
+            font-size: 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        #queryPanel h4 .close-query {
+            cursor: pointer;
+            font-size: 18px;
+            color: #999;
+        }
+
+        #queryPanel h4 .close-query:hover {
+            color: #fff;
+        }
+
+        #queryPanel label {
+            display: block;
+            margin: 8px 0 4px;
+            color: #aaa;
+            font-size: 12px;
+        }
+
+        #queryPanel select,
+        #queryPanel input[type="text"] {
+            width: 100%;
+            padding: 6px 10px;
+            border: 1px solid #526f82;
+            border-radius: 3px;
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            font-size: 13px;
+            box-sizing: border-box;
+        }
+
+        #queryPanel select option {
+            background: #333;
+            color: #fff;
+        }
+
+        #queryPanel .query-actions {
+            margin-top: 12px;
+            display: flex;
+            gap: 8px;
+        }
+
+        #queryPanel .query-actions button {
+            padding: 6px 16px;
+            cursor: pointer;
+            background: #2ec5ad;
+            color: #fff;
+            border: none;
+            border-radius: 3px;
+            font-size: 13px;
+        }
+
+        #queryPanel .query-actions button:hover {
+            background: #26a08d;
+        }
+
+        #queryPanel .query-actions button.btn-clear {
+            background: #e67e22;
+        }
+
+        #queryPanel .query-actions button.btn-clear:hover {
+            background: #cf6d17;
+        }
+
+        #queryResult {
+            margin-top: 10px;
+            max-height: 250px;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+
+        #queryResult table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        #queryResult table th {
+            background: rgba(46, 197, 173, 0.3);
+            padding: 4px 6px;
+            text-align: left;
+            font-size: 11px;
+            position: sticky;
+            top: 0;
+        }
+
+        #queryResult table td {
+            padding: 3px 6px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            font-size: 11px;
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        #queryResult table tr:hover td {
+            background: rgba(46, 197, 173, 0.15);
+        }
+
+        #queryResult .query-summary {
+            padding: 6px 0;
+            color: #aaa;
+            font-size: 12px;
+        }
+
+        #statusBar {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 999;
+            background: rgba(0, 0, 0, 0.7);
+            color: #ccc;
+            padding: 4px 12px;
+            font-size: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        #statusText {
+            flex: 1;
+        }
+
+        #cameraInfo {
+            text-align: right;
+            color: #aaa;
+            font-family: monospace;
+            font-size: 11px;
+        }
+
+        #layerPanel::-webkit-scrollbar,
+        #queryResult::-webkit-scrollbar,
+        #infoPanel::-webkit-scrollbar {
+            width: 6px;
+        }
+        #layerPanel::-webkit-scrollbar-thumb,
+        #queryResult::-webkit-scrollbar-thumb,
+        #infoPanel::-webkit-scrollbar-thumb {
+            background: #555;
+            border-radius: 3px;
+        }
+
+    </style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+
+<div id="toolbar">
+    <strong>动车所三维场景</strong><br><br>
+    <button id="btnReset">复位视角</button>
+    <button id="btnPick">拾取查询</button>
+    <button id="btnClearPick">清除拾取</button>
+    <button id="btnSqlQuery">SQL查询</button>
+    <button id="btnSection">剖面联动</button>
+</div>
+
+<div id="layerPanel">
+    <h4>图层列表</h4>
+    <ul id="layerList">
+        <li style="color:#999;">加载中...</li>
+    </ul>
+</div>
+
+<div id="infoPanel">
+    <span id="closeInfo">&times;</span>
+    <h3>属性信息</h3>
+    <div id="infoContent"></div>
+</div>
+
+<div id="queryPanel">
+    <h4>
+        <span>SQL 属性查询</span>
+        <span class="close-query" id="closeQuery">&times;</span>
+    </h4>
+    <label>数据集</label>
+    <select id="queryDataset"></select>
+    <label>SQL 条件（留空返回全部，限50条）</label>
+    <input type="text" id="querySql" placeholder="例: SmID < 10 或 SMID = 1">
+    <div class="query-actions">
+        <button id="btnDoQuery">查询</button>
+        <button id="btnClearQuery" class="btn-clear">清除结果</button>
+    </div>
+    <div id="queryResult"></div>
+</div>
+
+<div id="statusBar">
+    <span id="statusText">就绪</span>
+    <span id="cameraInfo"></span>
+</div>
+
+<script type="text/javascript">
+(function () {
+    var SERVICE_URL = 'https://ct.sunrtcloud.com/iserver/services/3D-dongchesuotest/rest/realspace';
+    var SCENE_NAME = 'dongchesuotest';
+    var DATA_URL = 'https://ct.sunrtcloud.com/iserver/services/data-dongchesuotest/rest/data';
+    var DATA_SOURCE = 'dongchesuo';
+    var DATASETS = [
+        'Line_dongchesuo',
+        'changguimoxing_dongchesuo',
+        'chuang_dongchesuo',
+        'jiegoujichu_dongchesuo',
+        'jiegoukuangjia_dongchesuo',
+        'langanfushou_dongchesuo',
+        'louban_dongchesuo',
+        'louti_dongchesuo',
+        'men_dongchesuo',
+        'muqiangqianbaj_dongchesuo',
+        'podao_dongchesuo',
+        'qiang_dongchesuo',
+        'tianhuaban_dongchesuo',
+        'wuding_dongchesuo',
+        'zhuanyongshebei_dongchesuo'
+    ];
+
+    var viewer = new Cesium.Viewer('cesiumContainer', {
+        infoBox: false,
+        selectionIndicator: false,
+        baseLayerPicker: false,
+        geocoder: false,
+        imageryProvider: new Cesium.ArcGisMapServerImageryProvider({
+            url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer'
+        })
+    });
+
+    var scene = viewer.scene;
+    var statusText = document.getElementById('statusText');
+    var cameraInfoEl = document.getElementById('cameraInfo');
+    var infoPanel = document.getElementById('infoPanel');
+    var infoContent = document.getElementById('infoContent');
+    var layerList = document.getElementById('layerList');
+    var queryPanel = document.getElementById('queryPanel');
+    var queryDataset = document.getElementById('queryDataset');
+    var querySql = document.getElementById('querySql');
+    var queryResult = document.getElementById('queryResult');
+    var pickEnabled = false;
+    var initialCamera = null;
+
+    // 填充数据集下拉
+    DATASETS.forEach(function (ds) {
+        var opt = document.createElement('option');
+        opt.value = ds;
+        opt.textContent = ds.replace('_dongchesuo', '');
+        queryDataset.appendChild(opt);
+    });
+
+    scene.postRender.addEventListener(function () {
+        var camPos = scene.camera.positionCartographic;
+        var lng = Cesium.Math.toDegrees(camPos.longitude).toFixed(6);
+        var lat = Cesium.Math.toDegrees(camPos.latitude).toFixed(6);
+        var alt = camPos.height.toFixed(1);
+        cameraInfoEl.textContent = '经度:' + lng + ' 纬度:' + lat + ' 高度:' + alt + 'm';
+    });
+
+    statusText.textContent = '正在加载场景...';
+
+    try {
+        var promise = scene.open(SERVICE_URL, SCENE_NAME);
+        Cesium.when(promise, function (layers) {
+            statusText.textContent = '场景加载完成，共 ' + layers.length + ' 个图层';
+
+            initialCamera = {
+                destination: scene.camera.position.clone(),
+                orientation: {
+                    heading: scene.camera.heading,
+                    pitch: scene.camera.pitch,
+                    roll: scene.camera.roll
+                }
+            };
+
+            buildLayerPanel(layers);
+            setupLayerQueryParams(layers);
+
+            sectionModule.init();
+            var btnSection = document.getElementById('btnSection');
+            btnSection.style.background = '#e67e22';
+        }, function (e) {
+            statusText.textContent = '场景加载失败: ' + (e.message || e);
+            console.error('场景加载失败:', e);
+        });
+    } catch (e) {
+        statusText.textContent = '场景打开异常: ' + (e.message || e);
+        console.error('场景打开异常:', e);
+    }
+
+    function setupLayerQueryParams(layers) {
+        for (var i = 0; i < layers.length; i++) {
+            var layer = layers[i];
+            var layerName = (layer._name || layer.name || '').toLowerCase();
+
+            var matchedDs = null;
+            for (var j = 0; j < DATASETS.length; j++) {
+                var dsClean = DATASETS[j].replace('_dongchesuo', '').toLowerCase();
+                if (layerName.indexOf(dsClean) !== -1 || dsClean.indexOf(layerName) !== -1) {
+                    matchedDs = DATASETS[j];
+                    break;
+                }
+            }
+
+            if (matchedDs && layer.setQueryParameter) {
+                try {
+                    layer.setQueryParameter({
+                        url: DATA_URL,
+                        dataSourceName: DATA_SOURCE,
+                        dataSetName: matchedDs
+                    });
+                    console.log('已为图层 "' + (layer._name || i) + '" 绑定数据集: ' + matchedDs);
+                } catch (e) {
+                    console.warn('setQueryParameter 失败:', layer._name, e);
+                }
+            }
+        }
+    }
+
+    function getLayerDisplayName(layer, index) {
+        if (layer._name && layer._name !== 's3md' && layer._name !== '') {
+            return layer._name;
+        }
+        if (layer.name && layer.name !== 's3md' && layer.name !== '') {
+            return layer.name;
+        }
+        if (layer._groupName && layer._groupName !== '') {
+            return layer._groupName;
+        }
+        return '图层_' + index;
+    }
+
+    function buildLayerPanel(layers) {
+        layerList.innerHTML = '';
+
+        if (!layers || layers.length === 0) {
+            layerList.innerHTML = '<li style="color:#999;">无图层</li>';
+            return;
+        }
+
+        for (var i = 0; i < layers.length; i++) {
+            (function (index) {
+                var layer = layers[index];
+                var layerName = getLayerDisplayName(layer, index);
+
+                var li = document.createElement('li');
+
+                var checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.checked = layer.visible !== false;
+                checkbox.className = 'layer-visibility';
+                checkbox.addEventListener('change', function () {
+                    layer.visible = this.checked;
+                });
+
+                var nameSpan = document.createElement('span');
+                nameSpan.className = 'layer-name';
+                nameSpan.textContent = layerName;
+                nameSpan.title = layerName;
+
+                var locateBtn = document.createElement('button');
+                locateBtn.className = 'layer-locate';
+                locateBtn.textContent = '定位';
+                locateBtn.addEventListener('click', function () {
+                    flyToLayer(layer, layerName);
+                });
+
+                li.appendChild(checkbox);
+                li.appendChild(nameSpan);
+                li.appendChild(locateBtn);
+                layerList.appendChild(li);
+            })(i);
+        }
+    }
+
+    function flyToLayer(layer, layerName) {
+        try {
+            if (layer._boundingSphere && layer._boundingSphere.center) {
+                var bs = layer._boundingSphere;
+                var offset = new Cesium.HeadingPitchRange(
+                    Cesium.Math.toRadians(0),
+                    Cesium.Math.toRadians(-45),
+                    bs.radius * 2.5
+                );
+                scene.camera.flyToBoundingSphere(bs, {
+                    offset: offset,
+                    duration: 1.5
+                });
+                statusText.textContent = '已定位到图层: ' + layerName;
+                return;
+            }
+
+            if (layer._layerBounds) {
+                var bounds = layer._layerBounds;
+                if (bounds.west !== undefined) {
+                    scene.camera.flyTo({
+                        destination: Cesium.Rectangle.fromDegrees(
+                            bounds.west, bounds.south, bounds.east, bounds.north
+                        ),
+                        duration: 1.5
+                    });
+                    statusText.textContent = '已定位到图层: ' + layerName;
+                    return;
+                }
+            }
+
+            if (layer.lon !== undefined && layer.lat !== undefined) {
+                var flyHeight = (layer.height || 0) + 500;
+                scene.camera.flyTo({
+                    destination: Cesium.Cartesian3.fromDegrees(layer.lon, layer.lat, flyHeight),
+                    orientation: {
+                        heading: 0,
+                        pitch: Cesium.Math.toRadians(-45),
+                        roll: 0
+                    },
+                    duration: 1.5
+                });
+                statusText.textContent = '已定位到图层: ' + layerName;
+                return;
+            }
+
+            if (layer.bounds) {
+                var b = layer.bounds;
+                scene.camera.flyTo({
+                    destination: Cesium.Rectangle.fromDegrees(
+                        b.west, b.south, b.east, b.north
+                    ),
+                    duration: 1.5
+                });
+                statusText.textContent = '已定位到图层: ' + layerName;
+                return;
+            }
+
+            statusText.textContent = '该图层无范围信息，无法定位';
+        } catch (e) {
+            statusText.textContent = '定位失败: ' + (e.message || e);
+            console.warn('flyToLayer error:', e);
+        }
+    }
+
+    function getAllLayers() {
+        var layers = [];
+        try {
+            if (scene.layers._layerQueue) {
+                var queue = scene.layers._layerQueue;
+                for (var i = 0; i < queue.length; i++) {
+                    layers.push(queue[i]);
+                }
+            } else if (scene.layers.layerQueue) {
+                var q = scene.layers.layerQueue;
+                for (var j = 0; j < q.length; j++) {
+                    layers.push(q[j]);
+                }
+            } else if (scene.layers._layers) {
+                var l = scene.layers._layers;
+                for (var k = 0; k < l.length; k++) {
+                    layers.push(l[k]);
+                }
+            }
+        } catch (e) {
+            console.warn('getAllLayers fallback:', e);
+        }
+        return layers;
+    }
+
+    // ========== 按钮事件 ==========
+
+    document.getElementById('btnReset').addEventListener('click', function () {
+        if (initialCamera) {
+            scene.camera.flyTo({
+                destination: initialCamera.destination,
+                orientation: initialCamera.orientation,
+                duration: 1.5
+            });
+            statusText.textContent = '已复位视角';
+        } else {
+            statusText.textContent = '初始视角未记录，请等待场景加载完成';
+        }
+    });
+
+    document.getElementById('btnPick').addEventListener('click', function () {
+        pickEnabled = !pickEnabled;
+        this.style.background = pickEnabled ? '#e67e22' : '#2ec5ad';
+        this.textContent = pickEnabled ? '拾取中...' : '拾取查询';
+        statusText.textContent = pickEnabled ? '点击模型进行属性查询' : '就绪';
+    });
+
+    document.getElementById('btnClearPick').addEventListener('click', function () {
+        infoPanel.style.display = 'none';
+        var layers = getAllLayers();
+        for (var i = 0; i < layers.length; i++) {
+            var layer = layers[i];
+            try {
+                if (layer.setSelection) {
+                    layer.setSelection([]);
+                }
+                if (layer.releaseSelection) {
+                    layer.releaseSelection();
+                }
+            } catch (e) {
+                console.warn('清除图层选择失败:', e);
+            }
+        }
+        statusText.textContent = '已清除拾取';
+    });
+
+    document.getElementById('closeInfo').addEventListener('click', function () {
+        infoPanel.style.display = 'none';
+    });
+
+    // SQL 查询面板开关
+    document.getElementById('btnSqlQuery').addEventListener('click', function () {
+        queryPanel.style.display = queryPanel.style.display === 'none' ? 'block' : 'none';
+    });
+
+    document.getElementById('closeQuery').addEventListener('click', function () {
+        queryPanel.style.display = 'none';
+    });
+
+    // ========== 拾取查询（pickEvent + 通用点击） ==========
+
+    viewer.pickEvent.addEventListener(function (feature) {
+        if (!pickEnabled) return;
+        showFeatureInfo(feature);
+    });
+
+    var pickHandler = new Cesium.ScreenSpaceEventHandler(scene.canvas);
+    pickHandler.setInputAction(function (e) {
+        if (!pickEnabled) return;
+
+        var picked = scene.pick(e.position);
+        if (!Cesium.defined(picked)) {
+            statusText.textContent = '未拾取到对象';
+            return;
+        }
+
+        if (picked.primitive && picked.primitive.setQueryParameter) {
+            var layer = picked.primitive;
+            var smId = picked.id;
+
+            if (smId !== undefined && smId !== null && layer.hasQueryAttrAction) {
+                queryFeatureById(layer, smId);
+                return;
+            }
+        }
+
+        if (picked.primitive) {
+            var prim = picked.primitive;
+            var info = {};
+
+            var publicKeys = ['lon', 'lat', 'height', 'positionUnits', 'max', 'min', 'index', 'hasAttributeIndex'];
+            publicKeys.forEach(function (key) {
+                if (prim[key] !== undefined && prim[key] !== null) {
+                    info[key] = prim[key];
+                }
+            });
+
+            if (picked.id !== undefined) info['对象ID'] = picked.id;
+            if (picked.height !== undefined) info['拾取高度'] = picked.height.toFixed(4) + 'm';
+            if (prim._name) info['图层名称'] = prim._name;
+            if (prim._groupName) info['组名'] = prim._groupName;
+
+            showFeatureInfo(info);
+        } else if (picked instanceof Cesium.Cesium3DTileFeature) {
+            var propertyNames = picked.getPropertyNames();
+            var featureObj = {};
+            propertyNames.forEach(function (name) {
+                featureObj[name] = picked.getProperty(name);
+            });
+            showFeatureInfo(featureObj);
+        } else {
+            statusText.textContent = '拾取到未知类型对象';
+            console.log('picked:', picked);
+        }
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+    function queryFeatureById(layer, smId) {
+        statusText.textContent = '正在查询对象属性 (SmID=' + smId + ')...';
+
+        var layerName = (layer._name || layer.name || '').toLowerCase();
+        var matchedDs = null;
+        for (var j = 0; j < DATASETS.length; j++) {
+            var dsClean = DATASETS[j].replace('_dongchesuo', '').toLowerCase();
+            if (layerName.indexOf(dsClean) !== -1 || dsClean.indexOf(layerName) !== -1) {
+                matchedDs = DATASETS[j];
+                break;
+            }
+        }
+
+        if (!matchedDs) {
+            matchedDs = DATASETS.length > 1 ? DATASETS[1] : DATASETS[0];
+        }
+
+        doSqlQuery(DATA_SOURCE + ':' + matchedDs, 'SmID = ' + smId, function (features) {
+            if (features && features.length > 0) {
+                var feat = features[0];
+                var info = {};
+                for (var idx = 0; idx < feat.fieldNames.length; idx++) {
+                    var val = feat.fieldValues[idx];
+                    if (val !== undefined && val !== null && val !== '') {
+                        info[feat.fieldNames[idx]] = val;
+                    }
+                }
+                showFeatureInfo(info);
+            } else {
+                statusText.textContent = '查询无结果 (SmID=' + smId + ')';
+            }
+        });
+    }
+
+    // ========== SQL 查询功能 ==========
+
+    document.getElementById('btnDoQuery').addEventListener('click', function () {
+        var ds = queryDataset.value;
+        var sql = querySql.value.trim();
+        var fullDatasetName = DATA_SOURCE + ':' + ds;
+        var filter = sql || '1=1';
+
+        statusText.textContent = '正在查询 ' + ds + '...';
+        queryResult.innerHTML = '<div class="query-summary">查询中...</div>';
+
+        doSqlQuery(fullDatasetName, filter, function (features) {
+            if (!features || features.length === 0) {
+                queryResult.innerHTML = '<div class="query-summary">查询无结果</div>';
+                statusText.textContent = '查询完成，无结果';
+                return;
+            }
+
+            statusText.textContent = '查询完成，共 ' + features.length + ' 条记录';
+
+            var fieldNames = features[0].fieldNames;
+            var displayFields = fieldNames.filter(function (n) {
+                return n.toUpperCase().indexOf('SM') !== 0 || n.toUpperCase() === 'SMID';
+            });
+
+            if (displayFields.length === 0) {
+                displayFields = fieldNames;
+            }
+
+            var html = '<div class="query-summary">共 ' + features.length + ' 条记录</div>';
+            html += '<table><thead><tr>';
+            displayFields.forEach(function (fn) {
+                html += '<th>' + fn + '</th>';
+            });
+            html += '</tr></thead><tbody>';
+
+            features.forEach(function (feat) {
+                html += '<tr>';
+                displayFields.forEach(function (fn) {
+                    var idx = feat.fieldNames.indexOf(fn);
+                    var val = idx >= 0 ? feat.fieldValues[idx] : '';
+                    html += '<td title="' + val + '">' + val + '</td>';
+                });
+                html += '</tr>';
+            });
+
+            html += '</tbody></table>';
+            queryResult.innerHTML = html;
+        });
+    });
+
+    document.getElementById('btnClearQuery').addEventListener('click', function () {
+        queryResult.innerHTML = '';
+        querySql.value = '';
+        statusText.textContent = '已清除查询结果';
+    });
+
+    function doSqlQuery(datasetName, filter, onSuccess) {
+        var getFeatureParam = new SuperMap.REST.FilterParameter({
+            attributeFilter: filter
+        });
+        var getFeatureBySQLParams = new SuperMap.REST.GetFeaturesBySQLParameters({
+            queryParameter: getFeatureParam,
+            toIndex: 49,
+            datasetNames: [datasetName],
+            returnContent: true
+        });
+        var getFeatureBySQLService = new SuperMap.REST.GetFeaturesBySQLService(DATA_URL, {
+            eventListeners: {
+                'processCompleted': function (resultSet) {
+                    if (resultSet.result && resultSet.result.features && resultSet.result.features.length > 0) {
+                        onSuccess(resultSet.result.features);
+                    } else {
+                        onSuccess([]);
+                    }
+                },
+                'processFailed': function (err) {
+                    console.error('SQL 查询失败:', err);
+                    statusText.textContent = 'SQL 查询失败';
+                    onSuccess([]);
+                }
+            }
+        });
+        getFeatureBySQLService.processAsync(getFeatureBySQLParams);
+    }
+
+    // ========== 属性信息展示 ==========
+
+    function showFeatureInfo(feature) {
+        if (!feature) {
+            statusText.textContent = '未获取到属性信息';
+            return;
+        }
+
+        var html = '<table>';
+        var keys = Object.keys(feature);
+
+        if (keys.length === 0) {
+            for (var key in feature) {
+                if (feature.hasOwnProperty && feature.hasOwnProperty(key)) {
+                    keys.push(key);
+                }
+            }
+        }
+
+        if (keys.length === 0) {
+            html += '<tr><td colspan="2">无属性数据</td></tr>';
+        } else {
+            keys.forEach(function (key) {
+                var val = feature[key];
+                if (val !== undefined && val !== null && val !== '') {
+                    html += '<tr><td>' + key + '</td><td>' + val + '</td></tr>';
+                }
+            });
+        }
+
+        html += '</table>';
+        infoContent.innerHTML = html;
+        infoPanel.style.display = 'block';
+        statusText.textContent = '已获取属性信息（共 ' + keys.length + ' 个字段）';
+
+        // 联动剖面图高亮
+        var uniqueId = feature['UNIQUEID'] || feature['UniqueId'] || feature['uniqueid'];
+        if (uniqueId && sectionModule.isActive()) {
+            sectionModule.highlightByUniqueId(uniqueId);
+        }
+    }
+
+    // ========================================================================
+    // 剖面图联动模块（Cesium scene.open 加载 realspace 3D 场景服务）
+    // ========================================================================
+    //
+    // 【iDesktop 发布时必须明确的参数】：
+    //
+    // ┌─────────────────────────┬───────────────────────────────────────────────────────────┐
+    // │ 参数                     │ 说明                                                      │
+    // ├─────────────────────────┼───────────────────────────────────────────────────────────┤
+    // │ SECTION_SERVICE_URL     │ 剖面场景的 realspace 服务地址                               │
+    // │                         │ iDesktop 中将 dwg 工作空间发布为 3D 服务后生成              │
+    // │                         │ 格式: {host}/iserver/services/{service-name}/rest/realspace │
+    // ├─────────────────────────┼───────────────────────────────────────────────────────────┤
+    // │ SECTION_SCENE_NAME      │ 场景名称，在 iDesktop 工作空间中的场景名                    │
+    // │                         │ 即 scenes/{name} 路径中的 name                             │
+    // ├─────────────────────────┼───────────────────────────────────────────────────────────┤
+    // │ SECTION_DATA_URL        │ 剖面图对应的数据服务地址（用于属性查询联动）                 │
+    // │                         │ 如果剖面图 dwg 有单独的数据服务则填写                       │
+    // │                         │ 若无独立数据服务，可复用三维模型的 DATA_URL                  │
+    // ├─────────────────────────┼───────────────────────────────────────────────────────────┤
+    // │ SECTION_DATA_SOURCE     │ 剖面数据源名称 (在 iDesktop 中可见)                        │
+    // ├─────────────────────────┼───────────────────────────────────────────────────────────┤
+    // │ UNIQUEID 字段           │ 三维模型和剖面图 dwg 共享的唯一关联字段                      │
+    // │                         │ 在 iDesktop 中制作数据时须保证两端数据集都包含此字段         │
+    // │                         │ 且值一致，作为拾取联动的关联键                               │
+    // └─────────────────────────┴───────────────────────────────────────────────────────────┘
+    //
+
+    var SECTION_SERVICE_URL = 'https://ct.sunrtcloud.com/iserver/services/3D-dongchesuo-poumian/rest/realspace';
+    var SECTION_SCENE_NAME = 'dongchesuo-poumian';
+    var SECTION_DATA_SOURCE = 'dongchesuo-dwg';
+    // 【需要在 iServer 中为 dongchesuo-dwg 数据源单独发布 data 服务】
+    // 发布后将下面的 URL 替换为实际地址，格式: {host}/iserver/services/data-{name}/rest/data
+    // 如果未发布，剖面图的主动 UNIQUEID 联动查询将不可用（仅拾取联动可用）
+    var SECTION_DATA_URL = '';
+
+    var sectionModule = (function () {
+        var sectionLayers = [];
+        var active = false;
+        var loaded = false;
+
+        function init() {
+            if (loaded) {
+                setAllVisible(true);
+                active = true;
+                statusText.textContent = '剖面图图层已显示';
+                return;
+            }
+
+            statusText.textContent = '正在加载剖面场景 (' + SECTION_SCENE_NAME + ')...';
+
+            try {
+                var promise = scene.open(SECTION_SERVICE_URL, SECTION_SCENE_NAME);
+                Cesium.when(promise, function (layers) {
+                    loaded = true;
+                    active = true;
+                    sectionLayers = layers || [];
+
+                    statusText.textContent = '剖面场景加载完成，共 ' + sectionLayers.length + ' 个图层';
+
+                    for (var k = 0; k < sectionLayers.length; k++) {
+                        var sl = sectionLayers[k];
+                        sl.visible = true;
+                        console.log('[剖面图层 ' + k + ']', {
+                            name: sl._name || sl.name,
+                            visible: sl.visible,
+                            lon: sl.lon, lat: sl.lat, height: sl.height,
+                            bounds: sl._layerBounds,
+                            boundingSphere: sl._boundingSphere
+                                ? { center: sl._boundingSphere.center, radius: sl._boundingSphere.radius }
+                                : null
+                        });
+                    }
+
+                    setupSectionLayerQueryParams();
+                    addSectionLayersToPanel();
+                }, function (e) {
+                    statusText.textContent = '剖面场景加载失败: ' + (e.message || e);
+                    console.error('剖面场景加载失败:', e);
+                });
+            } catch (e) {
+                statusText.textContent = '剖面场景打开异常: ' + (e.message || e);
+                console.error('剖面场景打开异常:', e);
+            }
+        }
+
+        function setupSectionLayerQueryParams() {
+            // 为剖面场景的每个图层绑定查询参数（用于 pickEvent 属性查询）
+            // 【前提】需要 SECTION_DATA_URL 已配置（即已为 dongchesuo-dwg 数据源发布 data 服务）
+            if (!SECTION_DATA_URL) {
+                console.info(
+                    '剖面图层未绑定查询参数：SECTION_DATA_URL 未配置。\n' +
+                    '如需拾取剖面图层时获取属性，请在 iServer 中为 "' + SECTION_DATA_SOURCE + '" 发布 data 服务后配置 SECTION_DATA_URL。'
+                );
+                return;
+            }
+
+            for (var i = 0; i < sectionLayers.length; i++) {
+                var layer = sectionLayers[i];
+                var layerName = layer._name || layer.name || '';
+
+                if (layerName && layer.setQueryParameter) {
+                    try {
+                        var dsName = layerName.indexOf('@') > 0
+                            ? layerName.split('@')[0]
+                            : layerName;
+
+                        layer.setQueryParameter({
+                            url: SECTION_DATA_URL,
+                            dataSourceName: SECTION_DATA_SOURCE,
+                            dataSetName: dsName
+                        });
+                        console.log('剖面图层 "' + layerName + '" 绑定数据集: ' + dsName);
+                    } catch (e) {
+                        console.warn('剖面图层 setQueryParameter 失败:', layerName, e);
+                    }
+                }
+            }
+        }
+
+        function addSectionLayersToPanel() {
+            var separator = document.createElement('li');
+            separator.id = 'sectionLayerSeparator';
+            separator.style.borderTop = '2px solid #e67e22';
+            separator.style.marginTop = '8px';
+            separator.style.paddingTop = '8px';
+            separator.style.color = '#e67e22';
+            separator.style.fontWeight = 'bold';
+            separator.style.fontSize = '12px';
+            separator.innerHTML = '<span>── 剖面图图层 ──</span>';
+            layerList.appendChild(separator);
+
+            // 总控行
+            var masterLi = document.createElement('li');
+            masterLi.id = 'sectionLayerMaster';
+
+            var masterCb = document.createElement('input');
+            masterCb.type = 'checkbox';
+            masterCb.checked = true;
+            masterCb.className = 'layer-visibility';
+            masterCb.addEventListener('change', function () {
+                setAllVisible(this.checked);
+                active = this.checked;
+                var items = document.querySelectorAll('.section-sub-layer .layer-visibility');
+                for (var i = 0; i < items.length; i++) {
+                    items[i].checked = this.checked;
+                }
+            });
+
+            var masterName = document.createElement('span');
+            masterName.className = 'layer-name';
+            masterName.textContent = '全部剖面图层 (' + sectionLayers.length + ')';
+            masterName.style.color = '#e67e22';
+
+            var masterLocate = document.createElement('button');
+            masterLocate.className = 'layer-locate';
+            masterLocate.textContent = '定位';
+            masterLocate.addEventListener('click', function () {
+                flyToSectionScene();
+            });
+
+            masterLi.appendChild(masterCb);
+            masterLi.appendChild(masterName);
+            masterLi.appendChild(masterLocate);
+            layerList.appendChild(masterLi);
+
+            // 子图层
+            for (var i = 0; i < sectionLayers.length; i++) {
+                (function (index) {
+                    var layer = sectionLayers[index];
+                    var name = layer._name || layer.name || ('剖面_图层_' + index);
+
+                    var li = document.createElement('li');
+                    li.className = 'section-sub-layer';
+                    li.style.paddingLeft = '20px';
+
+                    var checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.checked = layer.visible !== false;
+                    checkbox.className = 'layer-visibility';
+                    checkbox.addEventListener('change', function () {
+                        layer.visible = this.checked;
+                    });
+
+                    var nameSpan = document.createElement('span');
+                    nameSpan.className = 'layer-name';
+                    nameSpan.textContent = formatSectionLayerName(name);
+                    nameSpan.title = name;
+                    nameSpan.style.fontSize = '11px';
+
+                    var locateBtn = document.createElement('button');
+                    locateBtn.className = 'layer-locate';
+                    locateBtn.textContent = '定位';
+                    locateBtn.addEventListener('click', function () {
+                        flyToLayer(layer, name);
+                    });
+
+                    li.appendChild(checkbox);
+                    li.appendChild(nameSpan);
+                    li.appendChild(locateBtn);
+                    layerList.appendChild(li);
+                })(i);
+            }
+        }
+
+        function formatSectionLayerName(name) {
+            return name
+                .replace('dongchesuo_poumian_', '')
+                .replace('@dongchesuo-dwg', '')
+                .replace(/_/g, ' ');
+        }
+
+        function flyToSectionScene() {
+            if (sectionLayers.length === 0) {
+                statusText.textContent = '剖面图尚未加载';
+                return;
+            }
+
+            var mergedSphere = null;
+            for (var i = 0; i < sectionLayers.length; i++) {
+                var layer = sectionLayers[i];
+                if (layer._boundingSphere && layer._boundingSphere.center) {
+                    if (!mergedSphere) {
+                        mergedSphere = new Cesium.BoundingSphere(
+                            layer._boundingSphere.center.clone(),
+                            layer._boundingSphere.radius
+                        );
+                    } else {
+                        mergedSphere = Cesium.BoundingSphere.union(mergedSphere, layer._boundingSphere);
+                    }
+                }
+            }
+
+            if (mergedSphere) {
+                var offset = new Cesium.HeadingPitchRange(
+                    Cesium.Math.toRadians(0),
+                    Cesium.Math.toRadians(-60),
+                    mergedSphere.radius * 2.5
+                );
+                scene.camera.flyToBoundingSphere(mergedSphere, {
+                    offset: offset,
+                    duration: 1.5
+                });
+                statusText.textContent = '已定位到剖面场景';
+                return;
+            }
+
+            statusText.textContent = '剖面图层无范围信息，无法自动定位';
+        }
+
+        function setAllVisible(visible) {
+            for (var i = 0; i < sectionLayers.length; i++) {
+                sectionLayers[i].visible = visible;
+            }
+        }
+
+        function highlightByUniqueId(uniqueId) {
+            if (!loaded || sectionLayers.length === 0) return;
+
+            if (!SECTION_DATA_URL) {
+                statusText.textContent = '剖面图主动联动不可用（需发布 dongchesuo-dwg 数据服务）';
+                console.warn(
+                    '剖面图联动需要为数据源 "' + SECTION_DATA_SOURCE + '" 发布独立的 data REST 服务。\n' +
+                    '在 iServer 管理器中: 服务 → 发布服务 → 数据服务 → 选择包含 ' + SECTION_DATA_SOURCE + ' 的工作空间。\n' +
+                    '发布后设置 SECTION_DATA_URL 变量。'
+                );
+                return;
+            }
+
+            statusText.textContent = '正在剖面图中查找 UNIQUEID: ' + uniqueId + '...';
+
+            for (var i = 0; i < sectionLayers.length; i++) {
+                (function (layer) {
+                    if (!layer.setSelection) return;
+
+                    var layerName = layer._name || layer.name || '';
+                    var dsName = layerName.indexOf('@') > 0
+                        ? layerName.split('@')[0]
+                        : layerName;
+
+                    var fullDatasetName = SECTION_DATA_SOURCE + ':' + dsName;
+                    var filter = "UNIQUEID = '" + uniqueId + "'";
+
+                    var getFeatureParam = new SuperMap.REST.FilterParameter({
+                        attributeFilter: filter
+                    });
+                    var params = new SuperMap.REST.GetFeaturesBySQLParameters({
+                        queryParameter: getFeatureParam,
+                        toIndex: 0,
+                        datasetNames: [fullDatasetName],
+                        returnContent: true
+                    });
+                    var service = new SuperMap.REST.GetFeaturesBySQLService(SECTION_DATA_URL, {
+                        eventListeners: {
+                            'processCompleted': function (resultSet) {
+                                if (resultSet.result && resultSet.result.features && resultSet.result.features.length > 0) {
+                                    var feat = resultSet.result.features[0];
+                                    var smId = null;
+                                    for (var idx = 0; idx < feat.fieldNames.length; idx++) {
+                                        if (feat.fieldNames[idx].toUpperCase() === 'SMID') {
+                                            smId = parseInt(feat.fieldValues[idx]);
+                                            break;
+                                        }
+                                    }
+                                    if (smId !== null) {
+                                        layer.setSelection([smId]);
+                                        statusText.textContent = '已在剖面图中高亮 (图层: ' + dsName + ', SmID=' + smId + ')';
+                                    }
+                                }
+                            },
+                            'processFailed': function () {}
+                        }
+                    });
+                    service.processAsync(params);
+                })(sectionLayers[i]);
+            }
+        }
+
+        function highlightIn3DScene(uniqueId) {
+            statusText.textContent = '正在三维场景中定位 UNIQUEID: ' + uniqueId + '...';
+
+            for (var i = 0; i < DATASETS.length; i++) {
+                (function (dsName) {
+                    var fullName = DATA_SOURCE + ':' + dsName;
+                    var filter = "UNIQUEID = '" + uniqueId + "'";
+
+                    doSqlQuery(fullName, filter, function (features) {
+                        if (features && features.length > 0) {
+                            var feat = features[0];
+                            var smId = null;
+                            for (var idx = 0; idx < feat.fieldNames.length; idx++) {
+                                if (feat.fieldNames[idx].toUpperCase() === 'SMID') {
+                                    smId = parseInt(feat.fieldValues[idx]);
+                                    break;
+                                }
+                            }
+
+                            if (smId !== null) {
+                                highlight3DObject(dsName, smId, uniqueId);
+
+                                var info = {};
+                                for (var j = 0; j < feat.fieldNames.length; j++) {
+                                    var val = feat.fieldValues[j];
+                                    if (val !== undefined && val !== null && val !== '') {
+                                        info[feat.fieldNames[j]] = val;
+                                    }
+                                }
+                                showFeatureInfoNoLinkage(info);
+                            }
+                        }
+                    });
+                })(DATASETS[i]);
+            }
+        }
+
+        function highlight3DObject(datasetName, smId, uniqueId) {
+            var layers = getAllLayers();
+            var dsClean = datasetName.replace('_dongchesuo', '').toLowerCase();
+
+            for (var i = 0; i < layers.length; i++) {
+                var layer = layers[i];
+                var layerName = (layer._name || layer.name || '').toLowerCase();
+
+                if (layerName.indexOf(dsClean) !== -1 || dsClean.indexOf(layerName) !== -1) {
+                    try {
+                        if (layer.setSelection) {
+                            layer.setSelection([smId]);
+                            statusText.textContent = '已在三维场景中高亮对象 (SmID=' + smId + ', UNIQUEID=' + uniqueId + ')';
+                        }
+                    } catch (e) {
+                        console.warn('三维高亮失败:', e);
+                    }
+                    break;
+                }
+            }
+        }
+
+        function showFeatureInfoNoLinkage(feature) {
+            if (!feature) return;
+            var html = '<table>';
+            var keys = Object.keys(feature);
+            keys.forEach(function (key) {
+                var val = feature[key];
+                if (val !== undefined && val !== null && val !== '') {
+                    html += '<tr><td>' + key + '</td><td>' + val + '</td></tr>';
+                }
+            });
+            html += '</table>';
+            infoContent.innerHTML = html;
+            infoPanel.style.display = 'block';
+        }
+
+        function clearSelection() {
+            for (var i = 0; i < sectionLayers.length; i++) {
+                try {
+                    if (sectionLayers[i].releaseSelection) {
+                        sectionLayers[i].releaseSelection();
+                    }
+                    if (sectionLayers[i].setSelection) {
+                        sectionLayers[i].setSelection([]);
+                    }
+                } catch (e) {}
+            }
+        }
+
+        function hide() {
+            setAllVisible(false);
+            active = false;
+            clearSelection();
+        }
+
+        function toggle() {
+            if (active) {
+                hide();
+            } else {
+                init();
+            }
+        }
+
+        function getLayers() {
+            return sectionLayers;
+        }
+
+        return {
+            init: init,
+            toggle: toggle,
+            hide: hide,
+            flyTo: flyToSectionScene,
+            clearSelection: clearSelection,
+            getLayers: getLayers,
+            isActive: function () { return active; },
+            isLoaded: function () { return loaded; },
+            highlightByUniqueId: highlightByUniqueId,
+            highlightIn3DScene: highlightIn3DScene
+        };
+    })();
+
+    // 剖面图按钮事件
+    document.getElementById('btnSection').addEventListener('click', function () {
+        sectionModule.toggle();
+        this.style.background = sectionModule.isActive() ? '#e67e22' : '#2ec5ad';
+        var masterCb = document.querySelector('#sectionLayerMaster .layer-visibility');
+        if (masterCb) masterCb.checked = sectionModule.isActive();
+    });
+
+})();
+</script>
+</body>
+</html>

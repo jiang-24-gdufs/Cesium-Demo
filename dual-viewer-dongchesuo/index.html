@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=Edge,chrome=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
+  <title>动车所双屏联动</title>
+  <link href="http://127.0.0.1:5500/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <script src="http://127.0.0.1:5500/Build/Cesium/Cesium.js"></script>
+  <script src="http://127.0.0.1:5500/examples/webgl/js/supermap/SuperMap.Include.js"></script>
+  <link href="style.css" rel="stylesheet">
+</head>
+<body>
+
+  <div id="toolbar">
+    <span class="title">动车所 · 双屏联动</span>
+    <div class="toolbar-group">
+      <button id="btn-camera-sync" class="active">相机联动: 开</button>
+      <button id="btn-pick-sync" class="active">拾取联动: 开</button>
+    </div>
+    <div class="toolbar-divider"></div>
+    <div class="toolbar-group">
+      <button id="btn-pick-mode">拾取查询</button>
+      <button id="btn-clear-pick">清除拾取</button>
+      <button id="btn-reset">复位视角</button>
+    </div>
+    <div class="toolbar-divider"></div>
+    <div class="toolbar-group">
+      <button id="btn-layer-panel">图层管理</button>
+    </div>
+  </div>
+
+  <div id="main-container">
+    <div id="panel-left" class="viewer-panel">
+      <div class="panel-header">
+        <span class="panel-label">三维模型 · dongchesuotest</span>
+      </div>
+      <div id="viewer-a" class="cesium-container"></div>
+    </div>
+
+    <div id="divider"></div>
+
+    <div id="panel-right" class="viewer-panel">
+      <div class="panel-header">
+        <span class="panel-label">剖面图 · CesiumION 3DTileset</span>
+      </div>
+      <div id="viewer-b" class="cesium-container"></div>
+    </div>
+  </div>
+
+  <div id="layer-panel" class="layer-panel collapsed">
+    <div class="layer-panel-header" id="layer-panel-toggle">
+      <span class="layer-panel-title">图层管理</span>
+      <span class="layer-panel-arrow">▼</span>
+    </div>
+    <div class="layer-panel-body">
+      <div class="layer-group">
+        <div class="layer-group-header" data-group="model">
+          <span class="group-toggle-arrow">▾</span>
+          <span class="group-label">三维模型图层</span>
+          <span class="group-count" id="model-layer-count">0</span>
+        </div>
+        <ul class="layer-list" id="model-layer-list"></ul>
+      </div>
+      <div class="layer-group">
+        <div class="layer-group-header" data-group="section">
+          <span class="group-toggle-arrow">▾</span>
+          <span class="group-label">剖面图图层</span>
+          <span class="group-count" id="section-layer-count">0</span>
+        </div>
+        <ul class="layer-list" id="section-layer-list"></ul>
+      </div>
+    </div>
+  </div>
+
+  <div id="info-panel" class="info-panel" style="display:none;">
+    <div class="info-panel-header">
+      <span>属性信息</span>
+      <span class="info-close" id="info-close">&times;</span>
+    </div>
+    <div class="info-panel-body" id="info-content"></div>
+  </div>
+
+  <div id="status-bar">
+    <div class="status-left">
+      <span id="active-source-info" class="active-source-badge">活跃: --</span>
+      <span id="status-text">正在初始化...</span>
+    </div>
+    <span id="camera-info"></span>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

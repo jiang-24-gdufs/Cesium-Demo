@@ -54,6 +54,16 @@ const viewerB = new Cesium.Viewer('viewer-b', {
     )
   ),
 });
+window.viewer = viewerA;
+
+const tilesetA = viewerA.scene.primitives.add(
+  await Cesium.Cesium3DTileset.fromIonAssetId(5071436),
+);
+
+const tilesetB = viewerB.scene.primitives.add(
+  await Cesium.Cesium3DTileset.fromIonAssetId(5071436),
+);
+
 
 viewerA.imageryLayers.addImageryProvider(baseImageryProvider);
 viewerB.imageryLayers.addImageryProvider(
