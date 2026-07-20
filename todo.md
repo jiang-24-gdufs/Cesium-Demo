@@ -96,3 +96,62 @@ Object
 位置	663.346214, -124.000000
 状态	未查询到要素
 ```
+
+---
+属性查询联动功能（已优化）：
+
+### 问题根因分析
+1. **二维查询图层名错误**：之前使用 `dongchesuo-ditu@dongchesuo-poumian` 作为查询图层名，但该名称不存在。
+   - 实际情况：地图 `dongchesuo-ditu` 的 `queryable=false`，但其下有 18 个子图层（DWG 数据，数据源 `dongchesuo-dwg`）均 `queryable=true`
+   - 正确的查询图层名应是子图层名如 `dongchesuo_poumian_广州动车所四线检查库_1_1剖视图_去图框__1__dwg_R@dongchesuo-dwg` 等
+
+2. **联动字段问题**：三维拾取后仅传 SmID 联动，SmID 是数据集内部 ID，跨数据集无对应关系。
+   - 三维 BIM 数据（S3M）有 ELEMENTID/UNIQUEID 等业务字段
+   - 二维 DWG 剖面图数据没有这些 BIM 字段，二者属于不同数据源
+   - 联动逻辑已优化为优先使用 ELEMENTID > UNIQUEID 作为关联字段
+
+### 已实施的优化
+1. **`ensureMapLayerNames()`**：通过 `/layers.json` 接口动态获取所有 `queryable=true` 的子图层名列表并缓存
+2. **`queryLayersBatch()`**：将所有可查询子图层作为 `queryParams` 数组一次性提交 BoundsQuery，遍历 recordsets 找第一个有结果的图层
+3. **渐进容差策略**：50 → 200 → 500 三级容差递增，适配投影坐标系下的不同精度需求
+4. **三维拾取日志增强**：输出 ELEMENTID/UNIQUEID/SmID/数据集等关键字段，方便诊断
+5. **`linkPick3Dto2D()`**：三维→二维联动逻辑独立函数，日志中标注使用的关联字段
+
+### 待确认
+- 二维 DWG 剖面图与三维 BIM S3M 模型属于不同数据源，可能无法通过字段直接关联
+- 需验证二维子图层查询是否能返回有效要素属性
+
+---
+二维查询性能优化（已完成）：
+
+### 原始问题
+- 一次查询 18 个子图层，服务端逐个扫描开销大
+- `expectCount: 10` 且未禁用几何返回，DWG 要素几何体积巨大导致响应 ≥ 200MB
+- 三级容差递增（50→200→500）串行请求，最坏情况发 3 次请求
+- 快速连续点击无防抖，前一个请求未完成又发新的
+
+### 优化措施
+1. **空间预过滤**：`ensureMapQueryLayers()` 缓存每个子图层的 bounds，查询前用 `filterLayersByBounds()` 剔除点位不在其 bounds 内的图层（18 → 少数几个）
+2. **减少响应体积**：`expectCount: 1`（拾取只需最近 1 个要素）
+3. **简化容差策略**：单次 tolerance=100 查询替代三级递增，配合空间预过滤即可覆盖
+4. **防抖 150ms**：连续快速点击只发最后一次查询
+5. **AbortController**：新拾取自动取消前一次未完成的请求
+6. **计时日志**：输出每次查询耗时（`performance.now()`）便于诊断
+
+---
+继续优化（已完成）：
+
+### 1. 响应体积优化
+- **根因**：`queryOption: 'ATTRIBUTEANDGEOMETRY'` 导致 DWG 要素返回完整几何（TEXT 类型含数百个 points/texts/rotations 数组）
+- **修复**：`queryOption` 改为 `'ATTRIBUTE'`，仅返回属性字段，响应体积从 MB 级降到 KB 级
+
+### 2. 二维↔三维联动字段桥接
+- **问题**：DWG 子图层没有 `ELEMENTID`/`UNIQUEID` 字段，无法直接与三维 BIM 数据关联
+- **发现**：DWG 的 `BlockName` 字段中嵌入了 Revit ElementID，格式为 `..._dwg-{elementId}-{视图名}` (如 `..._dwg-554611-剖面 1`)
+- **修复**：`extractLinkKey()` 增加正则解析 `/_dwg-(\d+)-/`，从 BlockName 提取 ElementID
+- **优化**：`highlightInModelByKey()` 对纯数字 key 直接查 `ELEMENTID`（跳过 UNIQUEID），减少无效请求
+- **待验证**：BlockName 中的数字是否确实对应三维 BIM 的 ELEMENTID（需实际拾取测试）
+
+### 3. Leaflet 缩放修复
+- **问题**：`minZoom: -5` 且 `fitBounds` 设了 `maxZoom: 5`，投影坐标范围约 65000×24000 在 CRS.Simple 下需要更低缩放级别才能看到全貌
+- **修复**：`minZoom` 从 `-5` 调到 `-10`，`fitBounds` 去掉 `maxZoom` 限制

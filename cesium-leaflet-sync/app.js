@@ -55,7 +55,7 @@ const map2D = L.map('viewer-2d', {
   zoomControl: false,
   attributionControl: false,
   crs: L.CRS.Simple,
-  minZoom: -5,
+  minZoom: -10,
   maxZoom: 25,
 });
 L.control.zoom({ position: 'bottomright' }).addTo(map2D);
@@ -82,7 +82,7 @@ function fitMapToService() {
         const bounds = L.latLngBounds(sw, ne);
         console.log('[Leaflet] 服务范围 (原始):', b);
         console.log('[Leaflet] fitBounds:', { sw: [b.bottom, b.left], ne: [b.top, b.right] });
-        map2D.fitBounds(bounds, { padding: [20, 20], maxZoom: 5 });
+        map2D.fitBounds(bounds, { padding: [20, 20] });
         console.log('[Leaflet] 已定位到地图服务范围, 当前 zoom:', map2D.getZoom());
       } else if (mapInfo && mapInfo.center) {
         map2D.setView([mapInfo.center.y, mapInfo.center.x], 2);
@@ -447,10 +447,27 @@ function featureToInfo(feat) {
   return info;
 }
 
+/**
+ * 提取联动关联键：
+ * - 三维 BIM 数据优先使用 UNIQUEID / ELEMENTID
+ * - 二维 DWG 数据从 BlockName 中解析嵌入的 Revit ElementID
+ *   格式: "..._dwg-{elementId}-{视图名}"  如 "..._dwg-554611-剖面 1"
+ */
 function extractLinkKey(info) {
-  return info['UNIQUEID'] || info['UniqueId'] || info['uniqueid']
+  const directKey = info['UNIQUEID'] || info['UniqueId'] || info['uniqueid']
     || info['ELEMENTID'] || info['ElementId'] || info['elementid']
-    || info['elementId'] || null;
+    || info['elementId'];
+  if (directKey) return directKey;
+
+  const blockName = info['BlockName'] || info['blockName'] || info['BLOCKNAME'];
+  if (blockName) {
+    const match = blockName.match(/_dwg-(\d+)-/);
+    if (match) {
+      console.log(`[LinkKey] 从 BlockName 解析出 ElementID: ${match[1]} (BlockName: ${blockName})`);
+      return match[1];
+    }
+  }
+  return null;
 }
 
 function extractSmId(feat) {
@@ -474,31 +491,52 @@ function matchDataset(layer) {
 }
 
 /**
- * 通过 UNIQUEID 在三维 S3M 图层中高亮匹配对象
+ * 通过关联键在三维 S3M 图层中高亮匹配对象
+ * - 纯数字 key（来自 DWG BlockName 解析）→ 直接查 ELEMENTID
+ * - UUID 格式 key → 先查 UNIQUEID，回退 ELEMENTID
+ * - 命中后立即停止后续查询
  */
 function highlightInModelByKey(linkKey) {
   if (sceneLayers.length === 0) return;
-  console.log(`[Pick→3D] 通过 UNIQUEID="${linkKey}" 在三维模型中查找...`);
-  statusEl.textContent = `正在三维模型中查找 (key=${linkKey})...`;
-
   const keyStr = String(linkKey);
   const isNumeric = /^\d+$/.test(keyStr);
-  const filterByUniqueId = `UNIQUEID = '${keyStr}'`;
+
+  console.log(`[Pick→3D] 查找: key="${keyStr}" (${isNumeric ? 'ElementID' : 'UUID'}), 遍历 ${DATASETS.length} 个数据集`);
+  statusEl.textContent = `正在三维模型中查找 (key=${keyStr})...`;
+
+  let found = false;
+
   const filterByElementId = isNumeric ? `ELEMENTID = ${keyStr}` : `ELEMENTID = '${keyStr}'`;
 
   for (const ds of DATASETS) {
     const fullName = `${DATA_SOURCE}:${ds}`;
-    doSqlQuery(DATA_URL, fullName, filterByUniqueId, (features) => {
-      if (features.length > 0) {
-        doHighlight(features[0], ds, keyStr);
-        return;
-      }
-      doSqlQuery(DATA_URL, fullName, filterByElementId, (features2) => {
-        if (features2.length > 0) {
-          doHighlight(features2[0], ds, keyStr);
+
+    if (isNumeric) {
+      doSqlQuery(DATA_URL, fullName, filterByElementId, (features) => {
+        if (found) return;
+        if (features.length > 0) {
+          found = true;
+          doHighlight(features[0], ds, keyStr);
         }
       });
-    });
+    } else {
+      const filterByUniqueId = `UNIQUEID = '${keyStr}'`;
+      doSqlQuery(DATA_URL, fullName, filterByUniqueId, (features) => {
+        if (found) return;
+        if (features.length > 0) {
+          found = true;
+          doHighlight(features[0], ds, keyStr);
+          return;
+        }
+        doSqlQuery(DATA_URL, fullName, filterByElementId, (features2) => {
+          if (found) return;
+          if (features2.length > 0) {
+            found = true;
+            doHighlight(features2[0], ds, keyStr);
+          }
+        });
+      });
+    }
   }
 }
 
@@ -539,49 +577,40 @@ pickHandler3D.setInputAction((event) => {
 
   const layer = picked.primitive;
   const smId = picked.id;
-  console.log('[Pick3D] 命中:', { SmID: smId, layer: layer._name || layer.name || '?' });
+  const layerName = layer._name || layer.name || '?';
+  console.log('[Pick3D] 命中:', { SmID: smId, layer: layerName });
   statusEl.textContent = `拾取三维对象: SmID=${smId}, 查询属性中...`;
 
   if (layer.setSelection && smId !== undefined && smId !== null) {
     layer.setSelection([smId]);
   }
 
-  // 查询属性
   const ds = matchDataset(layer);
   if (ds && smId !== undefined && smId !== null) {
     const fullName = `${DATA_SOURCE}:${ds}`;
     doSqlQuery(DATA_URL, fullName, `SmID = ${smId}`, (features) => {
       if (features.length > 0) {
         const info = featureToInfo(features[0]);
-        console.log('[Pick3D] 查询到属性:', Object.keys(info).join(', '));
+        const elementId = info['ELEMENTID'] || info['ElementId'] || info['elementId'];
+        const uniqueId = info['UNIQUEID'] || info['UniqueId'] || info['uniqueid'];
+        console.log('[Pick3D] 查询到属性:', {
+          字段数: Object.keys(info).length,
+          ELEMENTID: elementId || '无',
+          UNIQUEID: uniqueId || '无',
+          SmID: smId,
+          数据集: ds,
+        });
         showInfoFromObject(info, '三维拾取');
 
-        // 拾取联动到二维
         if (syncController.pickSyncEnabled) {
-          const cartesian = viewer3D.scene.pickPosition(event.position);
-          if (cartesian) {
-            const carto = Cesium.Cartographic.fromCartesian(cartesian);
-            const lng = Cesium.Math.toDegrees(carto.longitude);
-            const lat = Cesium.Math.toDegrees(carto.latitude);
-            const popupHtml = buildPopupHtml(info);
-            syncController.showPickMarker2D(lng, lat, popupHtml);
-            map2D.panTo([lat, lng]);
-            console.log(`[Pick3D→2D] 联动标记到二维: ${lng.toFixed(6)}, ${lat.toFixed(6)}`);
-          }
+          linkPick3Dto2D(event.position, info, smId);
         }
       } else {
         console.log('[Pick3D] 数据集查询无结果, 显示基本信息');
         showBasicPickInfo(layer, picked);
 
         if (syncController.pickSyncEnabled) {
-          const cartesian = viewer3D.scene.pickPosition(event.position);
-          if (cartesian) {
-            const carto = Cesium.Cartographic.fromCartesian(cartesian);
-            const lng = Cesium.Math.toDegrees(carto.longitude);
-            const lat = Cesium.Math.toDegrees(carto.latitude);
-            syncController.showPickMarker2D(lng, lat, `<b>SmID:</b> ${smId || '--'}`);
-            map2D.panTo([lat, lng]);
-          }
+          linkPick3Dto2D(event.position, null, smId);
         }
       }
     });
@@ -589,6 +618,27 @@ pickHandler3D.setInputAction((event) => {
     showBasicPickInfo(layer, picked);
   }
 }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+/**
+ * 三维拾取后联动到二维地图
+ * 二维为 CRS.Simple (投影坐标)，三维拾取给出经纬度，两者坐标系不同，
+ * 仅在二维地图上放置标记 + 展示 popup 属性信息
+ */
+function linkPick3Dto2D(screenPos, info, smId) {
+  const cartesian = viewer3D.scene.pickPosition(screenPos);
+  if (!cartesian) return;
+  const carto = Cesium.Cartographic.fromCartesian(cartesian);
+  const lng = Cesium.Math.toDegrees(carto.longitude);
+  const lat = Cesium.Math.toDegrees(carto.latitude);
+  const popupHtml = info ? buildPopupHtml(info) : `<b>SmID:</b> ${smId || '--'}`;
+
+  syncController.showPickMarker2D(lng, lat, popupHtml);
+  map2D.panTo([lat, lng]);
+
+  const elementId = info ? (info['ELEMENTID'] || info['ElementId'] || info['elementId']) : null;
+  const linkField = elementId ? `ELEMENTID=${elementId}` : `SmID=${smId}`;
+  console.log(`[Pick3D→2D] 联动标记到二维: lnglat=(${lng.toFixed(6)}, ${lat.toFixed(6)}), ${linkField}`);
+}
 
 // 超图原生 pickEvent
 viewer3D.pickEvent.addEventListener((feature) => {
@@ -628,144 +678,197 @@ function queryMapFeatureByPoint(lng, lat) {
   queryMapFeatureByPointREST(lng, lat);
 }
 
-// 动态获取地图子图层名称（首次查询时缓存）
-let _mapLayerName = null;
-let _mapLayerNameFetched = false;
+// 动态获取地图所有可查询子图层（名称 + bounds），首次查询时缓存
+let _mapQueryLayers = null;
+let _mapQueryLayersFetched = false;
 
-function ensureMapLayerName() {
-  if (_mapLayerNameFetched) return Promise.resolve(_mapLayerName);
-  return fetch(MAP_QUERY_URL + '.json')
+function ensureMapQueryLayers() {
+  if (_mapQueryLayersFetched) return Promise.resolve(_mapQueryLayers);
+  return fetch(MAP_QUERY_URL + '/layers.json')
     .then(r => r.json())
-    .then(info => {
-      _mapLayerNameFetched = true;
-      if (info && info.subLayers && info.subLayers.layers && info.subLayers.layers.length > 0) {
-        _mapLayerName = info.subLayers.layers[0].name;
-        console.log('[Pick2D] 动态获取子图层名:', _mapLayerName);
-      } else {
-        _mapLayerName = 'dongchesuo-ditu@dongchesuo-poumian';
-        console.log('[Pick2D] 使用默认子图层名:', _mapLayerName);
+    .then(layersInfo => {
+      _mapQueryLayersFetched = true;
+      _mapQueryLayers = [];
+
+      function collectQueryableLayers(layers) {
+        if (!Array.isArray(layers)) return;
+        for (const layer of layers) {
+          if (layer.queryable && layer.name) {
+            _mapQueryLayers.push({
+              name: layer.name,
+              bounds: layer.bounds || null,
+              type: (layer.datasetInfo && layer.datasetInfo.type) || 'UNKNOWN',
+            });
+          }
+          if (layer.subLayers && layer.subLayers.layers) {
+            collectQueryableLayers(layer.subLayers.layers);
+          }
+        }
       }
-      return _mapLayerName;
+
+      collectQueryableLayers(layersInfo);
+
+      if (_mapQueryLayers.length === 0 && Array.isArray(layersInfo) && layersInfo.length > 0 && layersInfo[0].subLayers && layersInfo[0].subLayers.layers) {
+        collectQueryableLayers(layersInfo[0].subLayers.layers);
+      }
+
+      console.log(`[Pick2D] 获取到 ${_mapQueryLayers.length} 个可查询子图层:`,
+        _mapQueryLayers.slice(0, 3).map(l => `${l.name}(${l.type})`).join(', '),
+        _mapQueryLayers.length > 3 ? '...' : '');
+      return _mapQueryLayers;
     })
-    .catch(() => {
-      _mapLayerNameFetched = true;
-      _mapLayerName = 'dongchesuo-ditu@dongchesuo-poumian';
-      return _mapLayerName;
+    .catch(err => {
+      console.warn('[Pick2D] 获取子图层列表失败:', err);
+      _mapQueryLayersFetched = true;
+      _mapQueryLayers = [];
+      return _mapQueryLayers;
     });
 }
 
+// 查询防抖与取消控制
+let _queryAbortController = null;
+let _queryDebounceTimer = null;
+const QUERY_DEBOUNCE_MS = 150;
+
 function queryMapFeatureByPointREST(lng, lat) {
-  // CRS.Simple 下: lng=x坐标, lat=y坐标 (投影坐标系，单位为地图单位)
-  // 服务范围约 x: [-54936, 9923], y: [-6671, 17069]
-  // 使用较大容差以适配投影坐标系
-  const tolerance = 50;
   const x = lng;
   const y = lat;
 
-  ensureMapLayerName().then(layerName => {
-    const url = `${MAP_QUERY_URL}/queryResults.json?returnContent=true`;
+  if (_queryAbortController) {
+    _queryAbortController.abort();
+    _queryAbortController = null;
+  }
+  clearTimeout(_queryDebounceTimer);
 
-    const body = {
-      queryMode: 'BoundsQuery',
-      queryParameters: {
-        queryParams: [{ name: layerName }],
-        expectCount: 10,
-      },
-      bounds: {
-        leftBottom: { x: x - tolerance, y: y - tolerance },
-        rightTop: { x: x + tolerance, y: y + tolerance },
-      },
-    };
+  _queryDebounceTimer = setTimeout(() => {
+    _queryAbortController = new AbortController();
+    const signal = _queryAbortController.signal;
 
-    console.log('[Pick2D-REST] 发送 bounds 查询:', { center: { x, y }, tolerance, layerName });
+    ensureMapQueryLayers().then(queryLayers => {
+      if (signal.aborted) return;
+      if (!queryLayers || queryLayers.length === 0) {
+        console.warn('[Pick2D-REST] 无可查询子图层，跳过查询');
+        showInfoFromObject({ '位置': `${x.toFixed(2)}, ${y.toFixed(2)}`, '状态': '无可查询图层' }, '二维拾取');
+        return;
+      }
 
-    fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-      .then(r => r.json())
-      .then(data => {
-        console.log('[Pick2D-REST] 查询返回:', data);
-        if (data && data.recordsets && data.recordsets.length > 0) {
-          const rs = data.recordsets[0];
-          if (rs.features && rs.features.length > 0) {
-            const feat = rs.features[0];
-            const info = featureToInfo(feat);
-            console.log('[Pick2D-REST] 查询到要素属性:', Object.keys(info).join(', '));
-            showInfoFromObject(info, '二维拾取');
+      const tolerance = 100;
+      const filteredNames = filterLayersByBounds(queryLayers, x, y, tolerance);
 
-            if (syncController.pickSyncEnabled) {
-              const linkKey = extractLinkKey(info);
-              if (linkKey) {
-                console.log(`[Pick2D-REST→3D] 通过 UNIQUEID="${linkKey}" 联动三维高亮`);
-                highlightInModelByKey(linkKey);
-              }
-            }
-            return;
-          }
+      if (filteredNames.length === 0) {
+        console.log(`[Pick2D-REST] 点位 (${x.toFixed(0)}, ${y.toFixed(0)}) 不在任何子图层 bounds 内 (含 tolerance=${tolerance})`);
+        statusEl.textContent = '二维拾取: 该位置不在任何图层范围内';
+        showInfoFromObject({ '位置': `${x.toFixed(2)}, ${y.toFixed(2)}`, '状态': '不在图层范围内' }, '二维拾取');
+        return;
+      }
+
+      console.log(`[Pick2D-REST] 空间过滤: ${queryLayers.length} → ${filteredNames.length} 个图层, 点位: (${x.toFixed(0)}, ${y.toFixed(0)}), tolerance=${tolerance}`);
+
+      queryLayersBatch(x, y, filteredNames, tolerance, signal).then(result => {
+        if (signal.aborted) return;
+        if (!result) {
+          statusEl.textContent = '二维拾取: 该位置无可查询要素';
+          console.log('[Pick2D-REST] 查询无结果');
+          showInfoFromObject({ '位置': `${x.toFixed(2)}, ${y.toFixed(2)}`, '状态': '未查询到要素' }, '二维拾取');
         }
-
-        // BoundsQuery 无结果，尝试使用较大容差再试一次
-        console.log('[Pick2D-REST] BoundsQuery 无结果，增大容差重试...');
-        retryQueryWithLargerTolerance(x, y, layerName);
-      })
-      .catch(err => {
-        console.error('[Pick2D-REST] REST 查询失败:', err);
-        statusEl.textContent = `二维拾取查询失败`;
-        showInfoFromObject({ '位置': `${x.toFixed(2)}, ${y.toFixed(2)}`, '状态': '查询失败' }, '二维拾取');
       });
-  });
+    });
+  }, QUERY_DEBOUNCE_MS);
 }
 
-function retryQueryWithLargerTolerance(x, y, layerName) {
-  const tolerance = 200;
+/**
+ * 根据子图层 bounds 预过滤：仅保留点位(含 tolerance 扩展)与图层 bounds 相交的图层
+ */
+function filterLayersByBounds(queryLayers, x, y, tolerance) {
+  const result = [];
+  for (const ql of queryLayers) {
+    if (!ql.bounds) {
+      result.push(ql.name);
+      continue;
+    }
+    const b = ql.bounds;
+    const left = b.left !== undefined ? b.left : (b.leftBottom ? b.leftBottom.x : -Infinity);
+    const bottom = b.bottom !== undefined ? b.bottom : (b.leftBottom ? b.leftBottom.y : -Infinity);
+    const right = b.right !== undefined ? b.right : (b.rightTop ? b.rightTop.x : Infinity);
+    const top = b.top !== undefined ? b.top : (b.rightTop ? b.rightTop.y : Infinity);
+
+    if (x + tolerance >= left && x - tolerance <= right && y + tolerance >= bottom && y - tolerance <= top) {
+      result.push(ql.name);
+    }
+  }
+  return result;
+}
+
+/**
+ * 批量查询子图层，仅返回属性（不返回几何），取第一个命中结果
+ */
+function queryLayersBatch(x, y, layerNames, tolerance, signal) {
   const url = `${MAP_QUERY_URL}/queryResults.json?returnContent=true`;
+  const queryParams = layerNames.map(name => ({ name }));
 
   const body = {
     queryMode: 'BoundsQuery',
     queryParameters: {
-      queryParams: [{ name: layerName }],
-      expectCount: 10,
+      queryParams,
+      expectCount: 1,
+      returnContent: true,
     },
     bounds: {
       leftBottom: { x: x - tolerance, y: y - tolerance },
       rightTop: { x: x + tolerance, y: y + tolerance },
     },
+    geometry: null,
+    queryOption: 'ATTRIBUTE',
   };
 
-  fetch(url, {
+  const t0 = performance.now();
+  console.log(`[Pick2D-REST] BoundsQuery: tolerance=${tolerance}, ${queryParams.length} 个图层`);
+
+  return fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal,
   })
     .then(r => r.json())
     .then(data => {
-      console.log('[Pick2D-REST-Retry] 查询返回:', data);
-      if (data && data.recordsets && data.recordsets.length > 0) {
-        const rs = data.recordsets[0];
-        if (rs.features && rs.features.length > 0) {
-          const feat = rs.features[0];
-          const info = featureToInfo(feat);
-          console.log('[Pick2D-REST-Retry] 查询到要素属性:', Object.keys(info).join(', '));
-          showInfoFromObject(info, '二维拾取');
+      const elapsed = (performance.now() - t0).toFixed(0);
+      if (data && !data.succeed && data.error) {
+        console.warn(`[Pick2D-REST] 查询错误 (${elapsed}ms):`, data.error.errorMsg || data.error);
+        return false;
+      }
 
-          if (syncController.pickSyncEnabled) {
-            const linkKey = extractLinkKey(info);
-            if (linkKey) {
-              highlightInModelByKey(linkKey);
+      if (data && data.recordsets && data.recordsets.length > 0) {
+        for (let i = 0; i < data.recordsets.length; i++) {
+          const rs = data.recordsets[i];
+          const rsLayerName = rs.datasetName || `recordset[${i}]`;
+          if (rs.features && rs.features.length > 0) {
+            const feat = rs.features[0];
+            const info = featureToInfo(feat);
+            console.log(`[Pick2D-REST] 命中: ${rsLayerName}, ${elapsed}ms, ${Object.keys(info).length} 个字段`);
+            showInfoFromObject(info, `二维拾取 (${rsLayerName})`);
+
+            if (syncController.pickSyncEnabled) {
+              const linkKey = extractLinkKey(info);
+              if (linkKey) {
+                console.log(`[Pick2D-REST→3D] 联动: key="${linkKey}"`);
+                highlightInModelByKey(linkKey);
+              }
             }
+            return true;
           }
-          return;
         }
       }
-      statusEl.textContent = `二维拾取: 该位置无可查询要素`;
-      console.log('[Pick2D-REST-Retry] 该位置无可查询要素');
-      showInfoFromObject({ '位置': `${x.toFixed(2)}, ${y.toFixed(2)}`, '状态': '未查询到要素' }, '二维拾取');
+      console.log(`[Pick2D-REST] 无结果 (${elapsed}ms)`);
+      return false;
     })
     .catch(err => {
-      console.error('[Pick2D-REST-Retry] 查询失败:', err);
-      showInfoFromObject({ '位置': `${x.toFixed(2)}, ${y.toFixed(2)}`, '状态': '查询失败' }, '二维拾取');
+      if (err.name === 'AbortError') {
+        console.log('[Pick2D-REST] 查询已取消 (新拾取覆盖)');
+        return false;
+      }
+      console.error('[Pick2D-REST] 查询失败:', err);
+      return false;
     });
 }
 
