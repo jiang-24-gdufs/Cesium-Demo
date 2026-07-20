@@ -48,3 +48,51 @@ content_main.js:4847 This page uses Chrome's Built-In AI features (LanguageDetec
 app.js:55 [Leaflet] SuperMap 图层加载完成
 ```
 - console一直output “112app.js:55 [Leaflet] SuperMap 图层加载完成” 这个应该是不合理的，fix
+
+6. Bug Fix: 
+- 图层管理的panel被遮挡了， 无法交互；应该正确在三维场景的容器中展示，不能被二维地图模块遮挡；
+- 新增leaflet地图的拾取交互，输出拾取部件完整信息（三维场景拾取也需要输出）；如果二维场景拾取补充能查询信息可以询问；通过唯一ID，联动三维场景中的三维部件高亮； 
+- 这个二维/三维场景默认关闭视角联动；直接移除这个视角联动交互
+
+7. Bug Fix：
+- 现在二维的服务加载异常了，刚刚修复之前还是正确的; 可能是没有正确在初始化后聚焦到场景中的地图服务中；二维场景leaflet额外实现一个基于已经加载的服务定位的交互；
+- Cesium.js:26  GET https://ct.sunrtcloud.com/iserver/services/3D-dongchesuo-poumian/rest/realspace/scenes.json 404 (Not Found)； Cesium 不再需要加载这个poumian服务
+- 继续移除相机联动交互入口； 修改二维场景名称为leaflet
+
+8. Bug Fix:
+- 由于二维地图的range太大，导致无法正确聚焦到这个图层，怎么处理？
+[LayerPanel] 定位到二维图层: 动车所平面图 (SuperMap)
+app.js:82 [Leaflet] 已定位到地图服务范围: 
+{top: 17069.480773367242, left: -54936.20651449464, bottom: -6671.335316738036, leftBottom: {…}, right: 9923.859925007138, …}
+bottom
+: 
+-6671.335316738036
+left
+: 
+-54936.20651449464
+leftBottom
+: 
+{x: -54936.20651449464, y: -6671.335316738036}
+right
+: 
+9923.859925007138
+rightTop
+: 
+{x: 9923.859925007138, y: 17069.480773367242}
+top
+: 
+17069.480773367242
+[[Prototype]]
+: 
+Object
+
+- 无法正确定位到二维场景中加载的图层；现在的设置中二维场景也不能缩放
+- 属性查询信息z-index被二维地图遮挡； 
+- 三维场景中拾取后，二维地图可以正确关联线，并展示属性；但是二维地图中拾取要素无法查询：
+```
+属性信息
+×
+二维拾取
+位置	663.346214, -124.000000
+状态	未查询到要素
+```

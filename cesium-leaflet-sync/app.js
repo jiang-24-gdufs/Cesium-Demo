@@ -1,14 +1,11 @@
 import { CesiumLeafletSyncController } from './sync-controller.js';
 
 // ── 超图服务配置 ──
-// 三维模型场景（与 dual-viewer-dongchesuo 一致）
 const MODEL_SERVICE_URL = 'https://ct.sunrtcloud.com/iserver/services/3D-dongchesuotest/rest/realspace';
 const MODEL_SCENE_NAME = 'dongchesuotest';
 
-// 二维地图服务（仅 Leaflet 可正确加载的 SingleImage 服务）
 const MAP_SERVICE_URL = 'https://ct.sunrtcloud.com/iserver/services/map-dongchesuo-poumian/rest/maps/dongchesuo-ditu';
 
-// 数据查询服务（用于拾取属性查询）
 const DATA_URL = 'https://ct.sunrtcloud.com/iserver/services/data-dongchesuotest/rest/data';
 const DATA_SOURCE = 'dongchesuo';
 const DATASETS = [
@@ -18,6 +15,9 @@ const DATASETS = [
   'muqiangqianbaj_dongchesuo', 'podao_dongchesuo', 'qiang_dongchesuo',
   'tianhuaban_dongchesuo', 'wuding_dongchesuo', 'zhuanyongshebei_dongchesuo',
 ];
+
+// 二维地图查询服务（用于 Leaflet 端拾取属性查询）
+const MAP_QUERY_URL = 'https://ct.sunrtcloud.com/iserver/services/map-dongchesuo-poumian/rest/maps/dongchesuo-ditu';
 
 const statusEl = document.getElementById('status-text');
 const cameraInfoEl = document.getElementById('camera-info');
@@ -29,7 +29,7 @@ console.log('[Init] 服务配置:', {
   '数据服务': DATA_URL,
 });
 
-// ── 创建 Cesium 三维 Viewer（超图扩展） ──
+// ── 创建 Cesium 三维 Viewer ──
 const viewer3D = new Cesium.Viewer('viewer-3d', {
   infoBox: false,
   selectionIndicator: false,
@@ -50,27 +50,52 @@ console.log('[Init] Cesium Viewer 创建完成');
 
 // ── 创建 Leaflet 二维地图 ──
 const map2D = L.map('viewer-2d', {
-  center: [39.0, 117.0],
-  zoom: 15,
+  center: [0, 0],
+  zoom: 0,
   zoomControl: false,
   attributionControl: false,
+  crs: L.CRS.Simple,
+  minZoom: -5,
+  maxZoom: 25,
 });
-
 L.control.zoom({ position: 'bottomright' }).addTo(map2D);
 console.log('[Init] Leaflet Map 创建完成');
 
 // ── Leaflet 图层加载 ──
-const osmLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 19,
-}).addTo(map2D);
-console.log('[Leaflet] OSM 底图已添加');
+// CRS.Simple 下不使用 OSM 底图（投影坐标系与经纬度瓦片不兼容）
+const osmLayer = null;
+console.log('[Leaflet] CRS.Simple 模式，跳过 OSM 底图');
 
 let supermapLayer = null;
 let supermapLayerLoaded = false;
 
+function fitMapToService() {
+  console.log('[Leaflet] 查询地图服务范围用于自动定位...');
+  fetch(MAP_SERVICE_URL + '.json')
+    .then(r => r.json())
+    .then(mapInfo => {
+      if (mapInfo && mapInfo.bounds) {
+        const b = mapInfo.bounds;
+        // CRS.Simple 下坐标映射: latLng(y, x)
+        const sw = L.latLng(b.bottom, b.left);
+        const ne = L.latLng(b.top, b.right);
+        const bounds = L.latLngBounds(sw, ne);
+        console.log('[Leaflet] 服务范围 (原始):', b);
+        console.log('[Leaflet] fitBounds:', { sw: [b.bottom, b.left], ne: [b.top, b.right] });
+        map2D.fitBounds(bounds, { padding: [20, 20], maxZoom: 5 });
+        console.log('[Leaflet] 已定位到地图服务范围, 当前 zoom:', map2D.getZoom());
+      } else if (mapInfo && mapInfo.center) {
+        map2D.setView([mapInfo.center.y, mapInfo.center.x], 2);
+        console.log('[Leaflet] 已定位到地图服务中心:', mapInfo.center);
+      }
+    })
+    .catch(err => {
+      console.warn('[Leaflet] 查询地图服务范围失败:', err);
+    });
+}
+
 function loadSupermapLayer() {
   console.log('[Leaflet] 尝试加载 SuperMap 地图服务:', MAP_SERVICE_URL);
-
   try {
     supermapLayer = L.supermap.imageMapLayer(MAP_SERVICE_URL, {
       transparent: true,
@@ -82,6 +107,7 @@ function loadSupermapLayer() {
         supermapLayerLoaded = true;
         console.log('[Leaflet] SuperMap imageMapLayer 首次加载完成');
         statusEl.textContent = '二维地图图层加载完成';
+        fitMapToService();
         renderLayerPanel();
       }
     });
@@ -89,7 +115,6 @@ function loadSupermapLayer() {
     supermapLayer.on('error', (e) => {
       console.warn('[Leaflet] imageMapLayer 加载出错, 降级到 tiledMapLayer:', e);
       try { map2D.removeLayer(supermapLayer); } catch (_) {}
-
       supermapLayer = L.supermap.tiledMapLayer(MAP_SERVICE_URL, {
         transparent: true,
         cacheEnabled: false,
@@ -100,6 +125,7 @@ function loadSupermapLayer() {
           supermapLayerLoaded = true;
           console.log('[Leaflet] SuperMap tiledMapLayer 首次加载完成');
           statusEl.textContent = '二维地图图层加载完成 (瓦片模式)';
+          fitMapToService();
           renderLayerPanel();
         }
         supermapLayer.off('tileload', onFirstTile);
@@ -118,8 +144,8 @@ function loadSupermapLayer() {
     }
   }
 }
-
 loadSupermapLayer();
+fitMapToService();
 
 // ── 初始化联动控制器 ──
 const syncController = new CesiumLeafletSyncController(viewer3D, map2D);
@@ -128,12 +154,10 @@ console.log('[Init] 联动控制器初始化完成');
 // ── 加载三维 S3M 场景 ──
 let sceneLayers = [];
 let initialCamera = null;
-
 statusEl.textContent = '正在加载三维场景...';
 
 function loadModelScene() {
   console.log('[3D] 开始加载三维模型场景:', MODEL_SERVICE_URL, '场景:', MODEL_SCENE_NAME);
-
   try {
     const promise = viewer3D.scene.open(MODEL_SERVICE_URL, MODEL_SCENE_NAME);
     Cesium.when(promise, (layers) => {
@@ -163,11 +187,6 @@ function loadModelScene() {
       setupLayerQueryParams(sceneLayers);
       statusEl.textContent = `三维场景加载完成，共 ${sceneLayers.length} 个 S3M 图层`;
       renderLayerPanel();
-
-      setTimeout(() => {
-        syncCesiumViewToLeaflet();
-        console.log('[Sync] 初始视角已同步到二维地图');
-      }, 1000);
     }, (e) => {
       statusEl.textContent = `三维场景加载失败: ${e.message || e}`;
       console.error('[3D] 场景加载失败:', e);
@@ -190,7 +209,6 @@ function setupLayerQueryParams(layers) {
         break;
       }
     }
-
     if (matchedDs && layer.setQueryParameter) {
       try {
         layer.setQueryParameter({
@@ -208,17 +226,6 @@ function setupLayerQueryParams(layers) {
   console.log(`[3D] 数据集绑定完成: ${boundCount}/${layers.length} 个图层`);
 }
 
-function syncCesiumViewToLeaflet() {
-  const cam = viewer3D.camera;
-  const carto = cam.positionCartographic;
-  const lng = Cesium.Math.toDegrees(carto.longitude);
-  const lat = Cesium.Math.toDegrees(carto.latitude);
-  const height = carto.height;
-  const C = 40075016.686;
-  const zoom = Math.max(1, Math.min(22, Math.log2(C / Math.max(height, 1)) - 1));
-  map2D.setView([lat, lng], zoom, { animate: false });
-}
-
 loadModelScene();
 
 // ── 图层管理面板 ──
@@ -228,36 +235,27 @@ function renderLayerPanel() {
   const list2D = document.getElementById('2d-layer-list');
   const count2D = document.getElementById('2d-layer-count');
 
-  // ── 三维图层列表 ──
   count3D.textContent = sceneLayers.length;
   list3D.innerHTML = '';
 
   if (sceneLayers.length === 0) {
     list3D.innerHTML = '<li class="layer-item" style="color:#666;">加载中或无图层...</li>';
   } else {
-    // 总控行
     if (sceneLayers.length > 1) {
       const masterLi = document.createElement('li');
       masterLi.className = 'layer-item layer-master';
-
       const masterCb = document.createElement('input');
       masterCb.type = 'checkbox';
       masterCb.checked = true;
       masterCb.className = 'layer-cb';
       masterCb.addEventListener('change', () => {
-        for (const layer of sceneLayers) {
-          layer.visible = masterCb.checked;
-        }
-        list3D.querySelectorAll('.layer-sub .layer-cb').forEach((cb) => {
-          cb.checked = masterCb.checked;
-        });
+        for (const layer of sceneLayers) layer.visible = masterCb.checked;
+        list3D.querySelectorAll('.layer-sub .layer-cb').forEach((cb) => { cb.checked = masterCb.checked; });
       });
-
       const masterName = document.createElement('span');
       masterName.className = 'layer-name';
       masterName.style.fontWeight = '600';
       masterName.textContent = `全部三维图层 (${sceneLayers.length})`;
-
       masterLi.appendChild(masterCb);
       masterLi.appendChild(masterName);
       list3D.appendChild(masterLi);
@@ -266,7 +264,6 @@ function renderLayerPanel() {
     for (let i = 0; i < sceneLayers.length; i++) {
       const layer = sceneLayers[i];
       const name = getS3MDisplayName(layer, i);
-
       const li = document.createElement('li');
       li.className = sceneLayers.length > 1 ? 'layer-item layer-sub' : 'layer-item';
 
@@ -299,9 +296,10 @@ function renderLayerPanel() {
     }
   }
 
-  // ── 二维图层列表 ──
   const leafletLayers = [];
-  leafletLayers.push({ name: 'OpenStreetMap 底图', layer: osmLayer, type: 'base' });
+  if (osmLayer) {
+    leafletLayers.push({ name: 'OpenStreetMap 底图', layer: osmLayer, type: 'base' });
+  }
   if (supermapLayer) {
     leafletLayers.push({ name: '动车所平面图 (SuperMap)', layer: supermapLayer, type: 'overlay' });
   }
@@ -318,11 +316,8 @@ function renderLayerPanel() {
     cb.checked = map2D.hasLayer(layer);
     cb.className = 'layer-cb';
     cb.addEventListener('change', () => {
-      if (cb.checked) {
-        map2D.addLayer(layer);
-      } else {
-        map2D.removeLayer(layer);
-      }
+      if (cb.checked) map2D.addLayer(layer);
+      else map2D.removeLayer(layer);
       console.log(`[LayerPanel] 二维图层 "${name}" 可见性: ${cb.checked}`);
     });
 
@@ -334,71 +329,203 @@ function renderLayerPanel() {
     badge.className = 'layer-type-badge';
     badge.textContent = type === 'base' ? '底图' : '叠加';
 
-    li.appendChild(cb);
-    li.appendChild(nameSpan);
-    li.appendChild(badge);
+    if (type === 'overlay') {
+      const locateBtn = document.createElement('button');
+      locateBtn.className = 'layer-locate-btn';
+      locateBtn.textContent = '定位';
+      locateBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        fitMapToService();
+        console.log(`[LayerPanel] 定位到二维图层: ${name}`);
+      });
+      li.appendChild(cb);
+      li.appendChild(nameSpan);
+      li.appendChild(locateBtn);
+      li.appendChild(badge);
+    } else {
+      li.appendChild(cb);
+      li.appendChild(nameSpan);
+      li.appendChild(badge);
+    }
     list2D.appendChild(li);
   }
 
-  console.log('[LayerPanel] 图层面板已刷新:', {
-    '三维图层数': sceneLayers.length,
-    '二维图层数': leafletLayers.length,
-  });
+  console.log('[LayerPanel] 图层面板已刷新:', { '三维': sceneLayers.length, '二维': leafletLayers.length });
 }
 
 function getS3MDisplayName(layer, index) {
   const name = layer._name || layer.name || '';
   if (name && name !== 's3md') {
-    return name
-      .replace(/@[^@]+$/, '')
-      .replace(/dongchesuo[_ ]?poumian[_ ]?/gi, '')
-      .replace(/_dongchesuo/g, '')
-      .replace(/_/g, ' ')
-      .trim() || `图层_${index}`;
+    return name.replace(/@[^@]+$/, '').replace(/dongchesuo[_ ]?poumian[_ ]?/gi, '')
+      .replace(/_dongchesuo/g, '').replace(/_/g, ' ').trim() || `图层_${index}`;
   }
   return layer._groupName || `图层_${index}`;
 }
 
 function flyToS3MLayer(layer, layerName) {
   console.log(`[Navigate] 定位到三维图层: ${layerName}`);
-
   if (layer._boundingSphere && layer._boundingSphere.center &&
       !Cesium.Cartesian3.equals(layer._boundingSphere.center, Cesium.Cartesian3.ZERO)) {
     const offset = new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), layer._boundingSphere.radius * 2.5);
     viewer3D.scene.camera.flyToBoundingSphere(layer._boundingSphere, { offset, duration: 1.5 });
     statusEl.textContent = `已定位到图层: ${layerName}`;
-    console.log(`[Navigate] 通过 boundingSphere 定位, radius=${layer._boundingSphere.radius.toFixed(1)}`);
     return;
   }
-
   if (layer._layerBounds && layer._layerBounds.west !== undefined) {
     const b = layer._layerBounds;
-    viewer3D.scene.camera.flyTo({
-      destination: Cesium.Rectangle.fromDegrees(b.west, b.south, b.east, b.north),
-      duration: 1.5,
-    });
+    viewer3D.scene.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(b.west, b.south, b.east, b.north), duration: 1.5 });
     statusEl.textContent = `已定位到图层: ${layerName}`;
-    console.log(`[Navigate] 通过 layerBounds 定位`);
     return;
   }
-
   if (layer.lon !== undefined && layer.lat !== undefined) {
     viewer3D.scene.camera.flyTo({
       destination: Cesium.Cartesian3.fromDegrees(layer.lon, layer.lat, (layer.height || 0) + 500),
-      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-45), roll: 0 },
-      duration: 1.5,
+      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-45), roll: 0 }, duration: 1.5,
     });
     statusEl.textContent = `已定位到图层: ${layerName}`;
-    console.log(`[Navigate] 通过 lon/lat 定位: ${layer.lon}, ${layer.lat}`);
     return;
   }
-
   statusEl.textContent = '该图层无范围信息，无法定位';
   console.warn(`[Navigate] 图层 "${layerName}" 无范围信息`);
 }
 
-// ── 拾取模式 ──
+// ══════════════════════════════════════════════════
+// 拾取与联动
+// ══════════════════════════════════════════════════
+
 let pickEnabled = false;
+
+/**
+ * SuperMap REST SQL 查询封装
+ */
+function doSqlQuery(serviceUrl, datasetName, filter, onSuccess) {
+  if (!serviceUrl) { onSuccess([]); return; }
+  try {
+    const getFeatureParam = new SuperMap.REST.FilterParameter({ attributeFilter: filter });
+    const params = new SuperMap.REST.GetFeaturesBySQLParameters({
+      queryParameter: getFeatureParam,
+      toIndex: 49,
+      datasetNames: [datasetName],
+      returnContent: true,
+    });
+    const service = new SuperMap.REST.GetFeaturesBySQLService(serviceUrl, {
+      eventListeners: {
+        processCompleted: (resultSet) => {
+          if (resultSet.result && resultSet.result.features && resultSet.result.features.length > 0) {
+            onSuccess(resultSet.result.features);
+          } else {
+            onSuccess([]);
+          }
+        },
+        processFailed: (err) => {
+          console.warn('[Query] SQL 查询失败:', err);
+          onSuccess([]);
+        },
+      },
+    });
+    service.processAsync(params);
+  } catch (e) {
+    console.error('[Query] doSqlQuery error:', e);
+    onSuccess([]);
+  }
+}
+
+function featureToInfo(feat) {
+  const info = {};
+  if (feat.fieldNames && feat.fieldValues) {
+    for (let i = 0; i < feat.fieldNames.length; i++) {
+      const val = feat.fieldValues[i];
+      if (val !== undefined && val !== null && val !== '') {
+        info[feat.fieldNames[i]] = val;
+      }
+    }
+  } else if (feat.data) {
+    Object.assign(info, feat.data);
+  } else if (feat.attributes) {
+    Object.assign(info, feat.attributes);
+  }
+  return info;
+}
+
+function extractLinkKey(info) {
+  return info['UNIQUEID'] || info['UniqueId'] || info['uniqueid']
+    || info['ELEMENTID'] || info['ElementId'] || info['elementid']
+    || info['elementId'] || null;
+}
+
+function extractSmId(feat) {
+  if (feat.fieldNames && feat.fieldValues) {
+    for (let i = 0; i < feat.fieldNames.length; i++) {
+      if (feat.fieldNames[i].toUpperCase() === 'SMID') return parseInt(feat.fieldValues[i]);
+    }
+  }
+  if (feat.data && feat.data.SMID !== undefined) return parseInt(feat.data.SMID);
+  if (feat.attributes && feat.attributes.SMID !== undefined) return parseInt(feat.attributes.SMID);
+  return null;
+}
+
+function matchDataset(layer) {
+  const layerName = (layer._name || layer.name || '').toLowerCase();
+  for (const ds of DATASETS) {
+    const dsClean = ds.replace('_dongchesuo', '').toLowerCase();
+    if (layerName.indexOf(dsClean) !== -1 || dsClean.indexOf(layerName) !== -1) return ds;
+  }
+  return DATASETS.length > 1 ? DATASETS[1] : DATASETS[0];
+}
+
+/**
+ * 通过 UNIQUEID 在三维 S3M 图层中高亮匹配对象
+ */
+function highlightInModelByKey(linkKey) {
+  if (sceneLayers.length === 0) return;
+  console.log(`[Pick→3D] 通过 UNIQUEID="${linkKey}" 在三维模型中查找...`);
+  statusEl.textContent = `正在三维模型中查找 (key=${linkKey})...`;
+
+  const keyStr = String(linkKey);
+  const isNumeric = /^\d+$/.test(keyStr);
+  const filterByUniqueId = `UNIQUEID = '${keyStr}'`;
+  const filterByElementId = isNumeric ? `ELEMENTID = ${keyStr}` : `ELEMENTID = '${keyStr}'`;
+
+  for (const ds of DATASETS) {
+    const fullName = `${DATA_SOURCE}:${ds}`;
+    doSqlQuery(DATA_URL, fullName, filterByUniqueId, (features) => {
+      if (features.length > 0) {
+        doHighlight(features[0], ds, keyStr);
+        return;
+      }
+      doSqlQuery(DATA_URL, fullName, filterByElementId, (features2) => {
+        if (features2.length > 0) {
+          doHighlight(features2[0], ds, keyStr);
+        }
+      });
+    });
+  }
+}
+
+function doHighlight(feat, datasetName, linkKey) {
+  const smId = extractSmId(feat);
+  if (smId === null) return;
+  const dsClean = datasetName.replace('_dongchesuo', '').toLowerCase();
+  for (const layer of sceneLayers) {
+    const layerName = (layer._name || layer.name || '').toLowerCase();
+    if (layerName.indexOf(dsClean) !== -1 || dsClean.indexOf(layerName) !== -1) {
+      if (layer.setSelection) {
+        layer.setSelection([smId]);
+        console.log(`[Pick→3D] 已高亮三维图层 "${layer._name}", SmID=${smId}, key=${linkKey}`);
+        statusEl.textContent = `已在三维模型中高亮 (SmID=${smId}, key=${linkKey})`;
+      }
+      return;
+    }
+  }
+  for (const layer of sceneLayers) {
+    if (layer.setSelection) {
+      try { layer.setSelection([smId]); } catch (_) {}
+    }
+  }
+  statusEl.textContent = `已在三维模型中高亮 (SmID=${smId}, key=${linkKey})`;
+}
+
+// ── 三维拾取 ──
 const pickHandler3D = new Cesium.ScreenSpaceEventHandler(viewer3D.scene.canvas);
 
 pickHandler3D.setInputAction((event) => {
@@ -406,86 +533,263 @@ pickHandler3D.setInputAction((event) => {
   const picked = viewer3D.scene.pick(event.position);
   if (!Cesium.defined(picked) || !picked.primitive) {
     statusEl.textContent = '未拾取到对象';
-    console.log('[Pick] 三维拾取: 未命中对象');
+    console.log('[Pick3D] 未命中对象');
     return;
   }
 
   const layer = picked.primitive;
   const smId = picked.id;
-  console.log('[Pick] 三维拾取命中:', { SmID: smId, layer: layer._name || layer.name || '?' });
-  statusEl.textContent = `拾取三维对象: SmID=${smId}`;
+  console.log('[Pick3D] 命中:', { SmID: smId, layer: layer._name || layer.name || '?' });
+  statusEl.textContent = `拾取三维对象: SmID=${smId}, 查询属性中...`;
 
   if (layer.setSelection && smId !== undefined && smId !== null) {
     layer.setSelection([smId]);
   }
 
-  if (syncController.pickSyncEnabled) {
-    const cartesian = viewer3D.scene.pickPosition(event.position);
-    if (cartesian) {
-      const carto = Cesium.Cartographic.fromCartesian(cartesian);
-      const lng = Cesium.Math.toDegrees(carto.longitude);
-      const lat = Cesium.Math.toDegrees(carto.latitude);
+  // 查询属性
+  const ds = matchDataset(layer);
+  if (ds && smId !== undefined && smId !== null) {
+    const fullName = `${DATA_SOURCE}:${ds}`;
+    doSqlQuery(DATA_URL, fullName, `SmID = ${smId}`, (features) => {
+      if (features.length > 0) {
+        const info = featureToInfo(features[0]);
+        console.log('[Pick3D] 查询到属性:', Object.keys(info).join(', '));
+        showInfoFromObject(info, '三维拾取');
 
-      syncController.showPickMarker2D(lng, lat, `<b>SmID:</b> ${smId || '--'}`);
-      map2D.panTo([lat, lng]);
-      console.log(`[Pick→2D] 联动标记到二维: ${lng.toFixed(6)}, ${lat.toFixed(6)}`);
-    }
+        // 拾取联动到二维
+        if (syncController.pickSyncEnabled) {
+          const cartesian = viewer3D.scene.pickPosition(event.position);
+          if (cartesian) {
+            const carto = Cesium.Cartographic.fromCartesian(cartesian);
+            const lng = Cesium.Math.toDegrees(carto.longitude);
+            const lat = Cesium.Math.toDegrees(carto.latitude);
+            const popupHtml = buildPopupHtml(info);
+            syncController.showPickMarker2D(lng, lat, popupHtml);
+            map2D.panTo([lat, lng]);
+            console.log(`[Pick3D→2D] 联动标记到二维: ${lng.toFixed(6)}, ${lat.toFixed(6)}`);
+          }
+        }
+      } else {
+        console.log('[Pick3D] 数据集查询无结果, 显示基本信息');
+        showBasicPickInfo(layer, picked);
+
+        if (syncController.pickSyncEnabled) {
+          const cartesian = viewer3D.scene.pickPosition(event.position);
+          if (cartesian) {
+            const carto = Cesium.Cartographic.fromCartesian(cartesian);
+            const lng = Cesium.Math.toDegrees(carto.longitude);
+            const lat = Cesium.Math.toDegrees(carto.latitude);
+            syncController.showPickMarker2D(lng, lat, `<b>SmID:</b> ${smId || '--'}`);
+            map2D.panTo([lat, lng]);
+          }
+        }
+      }
+    });
+  } else {
+    showBasicPickInfo(layer, picked);
   }
-
-  showPickInfo(layer, picked);
 }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
-// Leaflet 二维点击
-map2D.on('click', (e) => {
-  if (!pickEnabled) return;
-  const { lat, lng } = e.latlng;
-  console.log(`[Pick] 二维拾取: ${lng.toFixed(6)}, ${lat.toFixed(6)}`);
-  statusEl.textContent = `拾取二维位置: ${lng.toFixed(6)}, ${lat.toFixed(6)}`;
-
-  syncController.showPickMarker2D(lng, lat);
-
-  if (syncController.pickSyncEnabled) {
-    syncController.showPickEntity3D(lng, lat, 0, `${lng.toFixed(4)}, ${lat.toFixed(4)}`);
-    console.log(`[Pick→3D] 联动标记到三维`);
-  }
-});
-
-// 超图三维 pickEvent
+// 超图原生 pickEvent
 viewer3D.pickEvent.addEventListener((feature) => {
-  if (!pickEnabled) return;
-  if (!feature) return;
-
+  if (!pickEnabled || !feature) return;
   const info = {};
-  const keys = Object.keys(feature);
-  for (const key of keys) {
+  for (const key of Object.keys(feature)) {
     if (feature[key] !== undefined && feature[key] !== null && feature[key] !== '') {
       info[key] = feature[key];
     }
   }
-
   if (Object.keys(info).length > 0) {
-    console.log('[Pick] 超图 pickEvent 属性:', Object.keys(info).join(', '));
-    showInfoFromObject(info);
+    console.log('[Pick3D] pickEvent 属性:', Object.keys(info).join(', '));
+    showInfoFromObject(info, '三维拾取 (pickEvent)');
   }
 });
 
-function showPickInfo(layer, picked) {
+// ── 二维地图拾取 ──
+map2D.on('click', (e) => {
+  if (!pickEnabled) return;
+  // CRS.Simple 下: latlng.lat = y坐标, latlng.lng = x坐标
+  const x = e.latlng.lng;
+  const y = e.latlng.lat;
+  console.log(`[Pick2D] 二维拾取位置 (投影坐标): x=${x.toFixed(2)}, y=${y.toFixed(2)}`);
+  statusEl.textContent = `二维拾取: x=${x.toFixed(2)}, y=${y.toFixed(2)}, 查询中...`;
+
+  syncController.showPickMarker2D(x, y);
+
+  // 直接传投影坐标进行查询 (lng=x, lat=y)
+  queryMapFeatureByPoint(x, y);
+});
+
+function queryMapFeatureByPoint(lng, lat) {
+  console.log('[Pick2D] 通过 SuperMap 地图查询服务查询点位要素...', { x: lng, y: lat });
+
+  // CRS.Simple 下 latlng 实际为投影坐标 (y=lat, x=lng)
+  // 使用 REST API 的 geometry 查询
+  queryMapFeatureByPointREST(lng, lat);
+}
+
+// 动态获取地图子图层名称（首次查询时缓存）
+let _mapLayerName = null;
+let _mapLayerNameFetched = false;
+
+function ensureMapLayerName() {
+  if (_mapLayerNameFetched) return Promise.resolve(_mapLayerName);
+  return fetch(MAP_QUERY_URL + '.json')
+    .then(r => r.json())
+    .then(info => {
+      _mapLayerNameFetched = true;
+      if (info && info.subLayers && info.subLayers.layers && info.subLayers.layers.length > 0) {
+        _mapLayerName = info.subLayers.layers[0].name;
+        console.log('[Pick2D] 动态获取子图层名:', _mapLayerName);
+      } else {
+        _mapLayerName = 'dongchesuo-ditu@dongchesuo-poumian';
+        console.log('[Pick2D] 使用默认子图层名:', _mapLayerName);
+      }
+      return _mapLayerName;
+    })
+    .catch(() => {
+      _mapLayerNameFetched = true;
+      _mapLayerName = 'dongchesuo-ditu@dongchesuo-poumian';
+      return _mapLayerName;
+    });
+}
+
+function queryMapFeatureByPointREST(lng, lat) {
+  // CRS.Simple 下: lng=x坐标, lat=y坐标 (投影坐标系，单位为地图单位)
+  // 服务范围约 x: [-54936, 9923], y: [-6671, 17069]
+  // 使用较大容差以适配投影坐标系
+  const tolerance = 50;
+  const x = lng;
+  const y = lat;
+
+  ensureMapLayerName().then(layerName => {
+    const url = `${MAP_QUERY_URL}/queryResults.json?returnContent=true`;
+
+    const body = {
+      queryMode: 'BoundsQuery',
+      queryParameters: {
+        queryParams: [{ name: layerName }],
+        expectCount: 10,
+      },
+      bounds: {
+        leftBottom: { x: x - tolerance, y: y - tolerance },
+        rightTop: { x: x + tolerance, y: y + tolerance },
+      },
+    };
+
+    console.log('[Pick2D-REST] 发送 bounds 查询:', { center: { x, y }, tolerance, layerName });
+
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+      .then(r => r.json())
+      .then(data => {
+        console.log('[Pick2D-REST] 查询返回:', data);
+        if (data && data.recordsets && data.recordsets.length > 0) {
+          const rs = data.recordsets[0];
+          if (rs.features && rs.features.length > 0) {
+            const feat = rs.features[0];
+            const info = featureToInfo(feat);
+            console.log('[Pick2D-REST] 查询到要素属性:', Object.keys(info).join(', '));
+            showInfoFromObject(info, '二维拾取');
+
+            if (syncController.pickSyncEnabled) {
+              const linkKey = extractLinkKey(info);
+              if (linkKey) {
+                console.log(`[Pick2D-REST→3D] 通过 UNIQUEID="${linkKey}" 联动三维高亮`);
+                highlightInModelByKey(linkKey);
+              }
+            }
+            return;
+          }
+        }
+
+        // BoundsQuery 无结果，尝试使用较大容差再试一次
+        console.log('[Pick2D-REST] BoundsQuery 无结果，增大容差重试...');
+        retryQueryWithLargerTolerance(x, y, layerName);
+      })
+      .catch(err => {
+        console.error('[Pick2D-REST] REST 查询失败:', err);
+        statusEl.textContent = `二维拾取查询失败`;
+        showInfoFromObject({ '位置': `${x.toFixed(2)}, ${y.toFixed(2)}`, '状态': '查询失败' }, '二维拾取');
+      });
+  });
+}
+
+function retryQueryWithLargerTolerance(x, y, layerName) {
+  const tolerance = 200;
+  const url = `${MAP_QUERY_URL}/queryResults.json?returnContent=true`;
+
+  const body = {
+    queryMode: 'BoundsQuery',
+    queryParameters: {
+      queryParams: [{ name: layerName }],
+      expectCount: 10,
+    },
+    bounds: {
+      leftBottom: { x: x - tolerance, y: y - tolerance },
+      rightTop: { x: x + tolerance, y: y + tolerance },
+    },
+  };
+
+  fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+    .then(r => r.json())
+    .then(data => {
+      console.log('[Pick2D-REST-Retry] 查询返回:', data);
+      if (data && data.recordsets && data.recordsets.length > 0) {
+        const rs = data.recordsets[0];
+        if (rs.features && rs.features.length > 0) {
+          const feat = rs.features[0];
+          const info = featureToInfo(feat);
+          console.log('[Pick2D-REST-Retry] 查询到要素属性:', Object.keys(info).join(', '));
+          showInfoFromObject(info, '二维拾取');
+
+          if (syncController.pickSyncEnabled) {
+            const linkKey = extractLinkKey(info);
+            if (linkKey) {
+              highlightInModelByKey(linkKey);
+            }
+          }
+          return;
+        }
+      }
+      statusEl.textContent = `二维拾取: 该位置无可查询要素`;
+      console.log('[Pick2D-REST-Retry] 该位置无可查询要素');
+      showInfoFromObject({ '位置': `${x.toFixed(2)}, ${y.toFixed(2)}`, '状态': '未查询到要素' }, '二维拾取');
+    })
+    .catch(err => {
+      console.error('[Pick2D-REST-Retry] 查询失败:', err);
+      showInfoFromObject({ '位置': `${x.toFixed(2)}, ${y.toFixed(2)}`, '状态': '查询失败' }, '二维拾取');
+    });
+}
+
+// ── 属性信息展示 ──
+
+function showBasicPickInfo(layer, picked) {
   const info = {};
   if (picked.id !== undefined) info['SmID'] = picked.id;
   if (picked.height !== undefined) info['拾取高度'] = picked.height.toFixed(4) + 'm';
   if (layer._name) info['图层名称'] = layer._name;
   if (layer._groupName) info['组名'] = layer._groupName;
-  ['lon', 'lat', 'height'].forEach((k) => {
-    if (layer[k] !== undefined) info[k] = layer[k];
-  });
-  showInfoFromObject(info);
+  ['lon', 'lat', 'height'].forEach((k) => { if (layer[k] !== undefined) info[k] = layer[k]; });
+  showInfoFromObject(info, '三维拾取');
 }
 
-function showInfoFromObject(info) {
+function showInfoFromObject(info, sourceLabel) {
   if (!info || Object.keys(info).length === 0) return;
 
   const skipKeys = ['SMINDEXKEY', 'SMBIMINFO'];
-  let html = '<table>';
+  let html = '';
+  if (sourceLabel) {
+    html += `<div class="info-source-label">${sourceLabel}</div>`;
+  }
+  html += '<table>';
   for (const [key, val] of Object.entries(info)) {
     if (val === undefined || val === null || val === '') continue;
     if (skipKeys.includes(key.toUpperCase())) continue;
@@ -498,23 +802,21 @@ function showInfoFromObject(info) {
   statusEl.textContent = `已获取属性 (${Object.keys(info).length} 个字段)`;
 }
 
+function buildPopupHtml(info) {
+  const keys = ['UNIQUEID', 'UniqueId', 'ELEMENTID', 'ElementId', 'SMID', 'SmID'];
+  let html = '<div style="font-size:12px;">';
+  for (const key of keys) {
+    if (info[key] !== undefined && info[key] !== null && info[key] !== '') {
+      html += `<b>${key}:</b> ${info[key]}<br>`;
+    }
+  }
+  const displayName = info['NAME'] || info['Name'] || info['name'] || '';
+  if (displayName) html += `<b>名称:</b> ${displayName}<br>`;
+  html += '</div>';
+  return html;
+}
+
 // ── 工具栏事件绑定 ──
-
-const viewSyncBtn = document.getElementById('btn-view-sync');
-viewSyncBtn.addEventListener('click', () => {
-  const enabled = syncController.toggleViewSync();
-  viewSyncBtn.classList.toggle('active', enabled);
-  viewSyncBtn.textContent = enabled ? '视角联动: 开' : '视角联动: 关';
-  console.log(`[Toolbar] 视角联动: ${enabled ? '开' : '关'}`);
-});
-
-const pickSyncBtn = document.getElementById('btn-pick-sync');
-pickSyncBtn.addEventListener('click', () => {
-  const enabled = syncController.togglePickSync();
-  pickSyncBtn.classList.toggle('active', enabled);
-  pickSyncBtn.textContent = enabled ? '拾取联动: 开' : '拾取联动: 关';
-  console.log(`[Toolbar] 拾取联动: ${enabled ? '开' : '关'}`);
-});
 
 const pickModeBtn = document.getElementById('btn-pick-mode');
 pickModeBtn.addEventListener('click', () => {
@@ -569,9 +871,7 @@ layerPanelToggle.addEventListener('click', () => {
 });
 
 document.querySelectorAll('.layer-group-header').forEach((header) => {
-  header.addEventListener('click', () => {
-    header.classList.toggle('collapsed');
-  });
+  header.addEventListener('click', () => { header.classList.toggle('collapsed'); });
 });
 
 document.getElementById('info-close').addEventListener('click', () => {
@@ -612,14 +912,13 @@ document.addEventListener('pointerup', stopDrag);
 document.addEventListener('pointercancel', stopDrag);
 
 // ── 状态栏 ──
-const updateCameraInfo = () => {
+viewer3D.scene.postRender.addEventListener(() => {
   const cam = viewer3D.scene.camera.positionCartographic;
   const lng = Cesium.Math.toDegrees(cam.longitude).toFixed(6);
   const lat = Cesium.Math.toDegrees(cam.latitude).toFixed(6);
   const alt = cam.height.toFixed(1);
   cameraInfoEl.textContent = `经度:${lng}° 纬度:${lat}° 高度:${alt}m`;
-};
-viewer3D.scene.postRender.addEventListener(updateCameraInfo);
+});
 
 // 活跃源追踪
 const panelLeftEl = document.getElementById('panel-left');
@@ -632,7 +931,5 @@ syncController.onActiveSourceChange((sourceId) => {
   activeSourceEl.textContent = `活跃: ${sourceId === '3D' ? '三维场景' : '二维地图'}`;
 });
 
-// 初始化图层面板（初始只有二维图层）
 renderLayerPanel();
-
 console.log('[CesiumLeafletSync] 二三维联动应用已启动');
