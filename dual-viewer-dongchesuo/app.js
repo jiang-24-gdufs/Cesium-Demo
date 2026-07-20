@@ -16,12 +16,11 @@ const DATASETS = [
   'tianhuaban_dongchesuo', 'wuding_dongchesuo', 'zhuanyongshebei_dongchesuo',
 ];
 
-// CesiumION 剖面图
-const SECTION_ION_ASSET_ID = 5071436;
-const ION_TOKEN = '-';
-Cesium.Ion.defaultAccessToken = ION_TOKEN;
-// 确保 Ion 服务器地址为官方地址
-Cesium.Ion.defaultServer = 'https://api.cesium.com';
+// 剖面图 realspace 3D 服务（超图 scene.open 加载）
+const SECTION_SERVICE_URL = 'https://ct.sunrtcloud.com/iserver/services/3D-dongchesuo-poumian/rest/realspace';
+const SECTION_SCENE_NAME = 'dongchesuo-poumian';
+const SECTION_DATA_SOURCE = 'dongchesuo-dwg';
+const SECTION_DATA_URL = '';
 const statusEl = document.getElementById('status-text');
 const cameraInfoEl = document.getElementById('camera-info');
 
@@ -63,7 +62,7 @@ const pickLinker = new PickLinker(viewerA, viewerB, syncController);
 
 // ── 场景加载状态 ──
 let modelInitialCamera = null;
-let sectionTileset = null;
+let sectionLayers = [];
 let modelLoadComplete = false;
 let sectionLoadComplete = false;
 
@@ -92,62 +91,141 @@ function loadModelScene() {
         modelLayersArr.push(layers[i]);
       }
 
-      setupLayerQueryParams(modelLayersArr);
+      setupLayerQueryParams(modelLayersArr, DATA_URL, DATA_SOURCE, DATASETS);
       layerManager.setModelLayers(modelLayersArr);
       pickLinker.setModelLayers(modelLayersArr);
 
       checkBothLoaded();
-      loadSectionTileset();
+      loadSectionScene();
     }, (e) => {
       statusEl.textContent = `三维模型加载失败: ${e.message || e}`;
       console.error('Model load failed:', e);
-      loadSectionTileset();
+      loadSectionScene();
     });
   } catch (e) {
     statusEl.textContent = `三维模型打开异常: ${e.message || e}`;
     console.error('Model open error:', e);
-    loadSectionTileset();
+    loadSectionScene();
   }
 }
 
-function loadSectionTileset() {
-  statusEl.textContent = '正在加载 CesiumION 剖面图 (AssetID: ' + SECTION_ION_ASSET_ID + ')...';
+function loadSectionScene() {
+  statusEl.textContent = `正在加载剖面场景 (${SECTION_SCENE_NAME})...`;
 
-  Cesium.when(Cesium.IonResource.fromAssetId(SECTION_ION_ASSET_ID), (resource) => {
-    sectionTileset = new Cesium.Cesium3DTileset({ url: resource });
-    viewerB.scene.primitives.add(sectionTileset);
-
-    Cesium.when(sectionTileset.readyPromise, () => {
+  try {
+    const promise = viewerB.scene.open(SECTION_SERVICE_URL, SECTION_SCENE_NAME);
+    Cesium.when(promise, (layers) => {
       sectionLoadComplete = true;
-      console.log('[Section] CesiumION Tileset 加载完成, AssetID:', SECTION_ION_ASSET_ID);
+      sectionLayers = layers || [];
 
-      layerManager.setSectionTileset(sectionTileset);
-      pickLinker.setSectionTileset(sectionTileset);
+      console.log('[Section] 剖面场景加载完成, 图层数:', sectionLayers.length);
 
-      viewerB.zoomTo(sectionTileset);
+      for (let i = 0; i < sectionLayers.length; i++) {
+        const sl = sectionLayers[i];
+        sl.visible = true;
+        console.log(`[剖面图层 ${i}]`, {
+          name: sl._name || sl.name,
+          visible: sl.visible,
+          lon: sl.lon, lat: sl.lat, height: sl.height,
+          bounds: sl._layerBounds,
+          boundingSphere: sl._boundingSphere
+            ? { center: sl._boundingSphere.center, radius: sl._boundingSphere.radius }
+            : null,
+        });
+      }
 
+      setupSectionLayerQueryParams(sectionLayers);
+      layerManager.setSectionLayers(sectionLayers);
+      pickLinker.setSectionLayers(sectionLayers);
+
+      flyToSectionScene(sectionLayers);
       checkBothLoaded();
     }, (e) => {
-      statusEl.textContent = `剖面图加载失败: ${e.message || e}`;
-      console.error('Section tileset load failed:', e);
+      statusEl.textContent = `剖面场景加载失败: ${e.message || e}`;
+      console.error('Section scene load failed:', e);
     });
-  }, (e) => {
-    statusEl.textContent = `ION 资源获取失败: ${e.message || e}`;
-    console.error('IonResource.fromAssetId failed:', e);
-  });
+  } catch (e) {
+    statusEl.textContent = `剖面场景打开异常: ${e.message || e}`;
+    console.error('Section scene open error:', e);
+  }
+}
+
+function setupSectionLayerQueryParams(layers) {
+  if (!SECTION_DATA_URL) {
+    console.info(
+      '剖面图层未绑定查询参数：SECTION_DATA_URL 未配置。\n' +
+      `如需拾取剖面图层时获取属性，请在 iServer 中为 "${SECTION_DATA_SOURCE}" 发布 data 服务后配置 SECTION_DATA_URL。`
+    );
+    return;
+  }
+
+  for (const layer of layers) {
+    const layerName = layer._name || layer.name || '';
+    if (layerName && layer.setQueryParameter) {
+      try {
+        const dsName = layerName.indexOf('@') > 0
+          ? layerName.split('@')[0]
+          : layerName;
+        layer.setQueryParameter({
+          url: SECTION_DATA_URL,
+          dataSourceName: SECTION_DATA_SOURCE,
+          dataSetName: dsName,
+        });
+        console.log(`剖面图层 "${layerName}" 绑定数据集: ${dsName}`);
+      } catch (e) {
+        console.warn('剖面图层 setQueryParameter 失败:', layerName, e);
+      }
+    }
+  }
+}
+
+function flyToSectionScene(layers) {
+  if (!layers || layers.length === 0) return;
+
+  for (const layer of layers) {
+    if (layer._boundingSphere && layer._boundingSphere.center &&
+        !Cesium.Cartesian3.equals(layer._boundingSphere.center, Cesium.Cartesian3.ZERO)) {
+      const offset = new Cesium.HeadingPitchRange(
+        Cesium.Math.toRadians(0),
+        Cesium.Math.toRadians(-45),
+        layer._boundingSphere.radius * 2.5
+      );
+      viewerB.scene.camera.flyToBoundingSphere(layer._boundingSphere, {
+        offset,
+        duration: 1.5,
+      });
+      return;
+    }
+    if (layer._layerBounds && layer._layerBounds.west !== undefined) {
+      const b = layer._layerBounds;
+      viewerB.scene.camera.flyTo({
+        destination: Cesium.Rectangle.fromDegrees(b.west, b.south, b.east, b.north),
+        duration: 1.5,
+      });
+      return;
+    }
+    if (layer.lon !== undefined && layer.lat !== undefined) {
+      viewerB.scene.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(layer.lon, layer.lat, (layer.height || 0) + 500),
+        orientation: { heading: 0, pitch: Cesium.Math.toRadians(-45), roll: 0 },
+        duration: 1.5,
+      });
+      return;
+    }
+  }
 }
 
 function checkBothLoaded() {
   if (modelLoadComplete && sectionLoadComplete) {
-    statusEl.textContent = `双场景加载完成 (模型: ${layerManager.modelLayers.length} 个S3M图层, 剖面: ION 3DTileset)`;
+    statusEl.textContent = `双场景加载完成 (模型: ${layerManager.modelLayers.length} 个S3M图层, 剖面: ${sectionLayers.length} 个S3M图层)`;
   }
 }
 
-function setupLayerQueryParams(layers) {
+function setupLayerQueryParams(layers, dataUrl, dataSource, datasets) {
   for (const layer of layers) {
     const layerName = (layer._name || layer.name || '').toLowerCase();
     let matchedDs = null;
-    for (const ds of DATASETS) {
+    for (const ds of datasets) {
       const dsClean = ds.replace('_dongchesuo', '').toLowerCase();
       if (layerName.indexOf(dsClean) !== -1 || dsClean.indexOf(layerName) !== -1) {
         matchedDs = ds;
@@ -158,8 +236,8 @@ function setupLayerQueryParams(layers) {
     if (matchedDs && layer.setQueryParameter) {
       try {
         layer.setQueryParameter({
-          url: DATA_URL,
-          dataSourceName: DATA_SOURCE,
+          url: dataUrl,
+          dataSourceName: dataSource,
           dataSetName: matchedDs,
         });
         console.log(`已绑定数据集: ${layer._name || '?'} -> ${matchedDs}`);
@@ -219,8 +297,8 @@ document.getElementById('btn-reset').addEventListener('click', () => {
   } else {
     statusEl.textContent = '初始视角未记录，等待场景加载';
   }
-  if (sectionTileset) {
-    viewerB.zoomTo(sectionTileset);
+  if (sectionLayers.length > 0) {
+    flyToSectionScene(sectionLayers);
   }
 });
 
@@ -281,10 +359,15 @@ syncController.onActiveSourceChange((sourceId) => {
   activeSourceEl.textContent = `活跃: ${sourceId === 'A' ? '三维模型' : '剖面图'}`;
 });
 
-// ── pickEvent（超图原生拾取事件，仅 ViewerA 有效）──
+// ── pickEvent（超图原生拾取事件）──
 viewerA.pickEvent.addEventListener((feature) => {
   if (!pickLinker.pickEnabled) return;
   showPickEventInfo(feature, 'A');
+});
+
+viewerB.pickEvent.addEventListener((feature) => {
+  if (!pickLinker.pickEnabled) return;
+  showPickEventInfo(feature, 'B');
 });
 
 function showPickEventInfo(feature, sourceId) {

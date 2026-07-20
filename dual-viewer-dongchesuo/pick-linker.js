@@ -2,8 +2,8 @@
  * PickLinker - 拾取联动控制器
  *
  * 核心功能：
- * 1. ViewerA (S3M) 点击拾取 -> 查询属性 -> 在 ViewerB (3DTileset) 中高亮匹配 feature
- * 2. ViewerB (3DTileset) 点击拾取 -> 展示属性 -> 在 ViewerA (S3M) 中高亮匹配对象
+ * 1. ViewerA (S3M) 点击拾取 -> 查询属性 -> 在 ViewerB (S3M 剖面图) 中通过 UNIQUEID 高亮匹配图层对象
+ * 2. ViewerB (S3M 剖面图) 点击拾取 -> 展示属性 -> 在 ViewerA (S3M) 中通过 UNIQUEID 高亮匹配对象
  *
  * 联动键：优先 UNIQUEID，降级到 ELEMENTID / SmID
  */
@@ -20,8 +20,7 @@ export class PickLinker {
     this._handlerB = null;
 
     this._modelLayers = [];
-    this._sectionTileset = null;
-    this._lastHighlightedFeature = null;
+    this._sectionLayers = [];
 
     this._DATA_URL = 'https://ct.sunrtcloud.com/iserver/services/data-dongchesuotest/rest/data';
     this._DATA_SOURCE = 'dongchesuo';
@@ -33,6 +32,9 @@ export class PickLinker {
       'tianhuaban_dongchesuo', 'wuding_dongchesuo', 'zhuanyongshebei_dongchesuo',
     ];
 
+    this._SECTION_DATA_SOURCE = 'dongchesuo-dwg';
+    this._SECTION_DATA_URL = '';
+
     this._statusEl = document.getElementById('status-text');
     this._infoPanelEl = document.getElementById('info-panel');
     this._infoContentEl = document.getElementById('info-content');
@@ -42,10 +44,8 @@ export class PickLinker {
   }
 
   setModelLayers(layers) { this._modelLayers = layers || []; }
-  setSectionTileset(tileset) { this._sectionTileset = tileset; }
 
-  // 向后兼容旧的 setSectionLayers 调用
-  setSectionLayers() {}
+  setSectionLayers(layers) { this._sectionLayers = layers || []; }
 
   get pickEnabled() { return this._pickEnabled; }
   get linkEnabled() { return this._linkEnabled; }
@@ -64,8 +64,8 @@ export class PickLinker {
     this._handlerA = new Cesium.ScreenSpaceEventHandler(this._viewerA.scene.canvas);
     this._handlerB = new Cesium.ScreenSpaceEventHandler(this._viewerB.scene.canvas);
 
-    this._handlerA.setInputAction((e) => this._onPickA(e), Cesium.ScreenSpaceEventType.LEFT_CLICK);
-    this._handlerB.setInputAction((e) => this._onPickB(e), Cesium.ScreenSpaceEventType.LEFT_CLICK);
+    this._handlerA.setInputAction((e) => this._onPickS3M(e, 'A'), Cesium.ScreenSpaceEventType.LEFT_CLICK);
+    this._handlerB.setInputAction((e) => this._onPickS3M(e, 'B'), Cesium.ScreenSpaceEventType.LEFT_CLICK);
   }
 
   _initInfoClose() {
@@ -75,12 +75,13 @@ export class PickLinker {
   }
 
   /**
-   * ViewerA 拾取 (S3M Layer)
+   * 通用 S3M 图层拾取（ViewerA / ViewerB 共用）
    */
-  _onPickA(event) {
+  _onPickS3M(event, sourceId) {
     if (!this._pickEnabled) return;
 
-    const scene = this._viewerA.scene;
+    const viewer = sourceId === 'A' ? this._viewerA : this._viewerB;
+    const scene = viewer.scene;
     const picked = scene.pick(event.position);
 
     if (!Cesium.defined(picked) || !picked.primitive) {
@@ -96,83 +97,31 @@ export class PickLinker {
       return;
     }
 
-    this._statusEl.textContent = `拾取: SmID=${smId}，查询属性中...`;
+    const label = sourceId === 'A' ? '三维模型' : '剖面图';
+    this._statusEl.textContent = `拾取 ${label}: SmID=${smId}，查询属性中...`;
 
     if (layer.setSelection) {
       layer.setSelection([smId]);
     }
 
-    const matchedDs = this._matchDataset(layer);
-
-    if (matchedDs && layer.hasQueryAttrAction) {
-      this._queryModelAndLink(matchedDs, smId, layer);
+    if (sourceId === 'A') {
+      const matchedDs = this._matchDataset(layer, this._DATASETS);
+      if (matchedDs && layer.hasQueryAttrAction) {
+        this._queryAndLinkToSection(matchedDs, smId);
+      } else {
+        this._showBasicInfo(layer, picked);
+      }
     } else {
-      this._showBasicInfo(layer, picked);
+      this._querySectionAndLinkToModel(layer, smId);
     }
   }
 
   /**
-   * ViewerB 拾取 (Cesium3DTileFeature)
+   * A→B: 查询三维模型属性后在剖面图 S3M 图层中联动高亮
    */
-  _onPickB(event) {
-    if (!this._pickEnabled) return;
-
-    const scene = this._viewerB.scene;
-    const picked = scene.pick(event.position);
-
-    if (!Cesium.defined(picked)) {
-      this._statusEl.textContent = '未拾取到对象';
-      return;
-    }
-
-    if (picked instanceof Cesium.Cesium3DTileFeature) {
-      this._onPickTileFeature(picked);
-      return;
-    }
-
-    // 可能是其他 primitive
-    this._statusEl.textContent = '拾取到非 3DTile 对象';
-    console.log('[PickB] non-tile picked:', picked);
-  }
-
-  /**
-   * 处理 3DTileFeature 拾取
-   */
-  _onPickTileFeature(feature) {
-    this._clearTileHighlight();
-
-    feature.color = Cesium.Color.YELLOW.withAlpha(0.7);
-    this._lastHighlightedFeature = feature;
-
-    const propertyIds = feature.getPropertyIds ? feature.getPropertyIds() : (feature.getPropertyNames ? feature.getPropertyNames() : []);
-    const info = {};
-    for (const name of propertyIds) {
-      const val = feature.getProperty(name);
-      if (val !== undefined && val !== null && val !== '') {
-        info[name] = val;
-      }
-    }
-
-    this._showInfo(info);
-    this._statusEl.textContent = `拾取剖面图 Feature (${propertyIds.length} 个属性)`;
-
-    if (this._linkEnabled) {
-      const linkKey = info['UNIQUEID'] || info['UniqueId'] || info['uniqueid']
-        || info['ELEMENTID'] || info['ElementId'] || info['elementid']
-        || info['elementId'];
-
-      if (linkKey) {
-        this._highlightInModelByKey(linkKey);
-      }
-    }
-  }
-
-  /**
-   * A→B: 查询模型属性后在 3DTileset 中联动高亮
-   */
-  _queryModelAndLink(datasetName, smId, sourceLayer) {
+  _queryAndLinkToSection(datasetName, smId) {
     const fullName = `${this._DATA_SOURCE}:${datasetName}`;
-    this._doSqlQuery(fullName, `SmID = ${smId}`, (features) => {
+    this._doSqlQuery(this._DATA_URL, fullName, `SmID = ${smId}`, (features) => {
       if (!features || features.length === 0) {
         this._statusEl.textContent = `查询无结果 (SmID=${smId})`;
         return;
@@ -182,70 +131,85 @@ export class PickLinker {
       const info = this._featureToInfo(feat);
       this._showInfo(info);
 
-      if (this._linkEnabled && this._sectionTileset) {
-        const linkKey = info['UNIQUEID'] || info['UniqueId'] || info['uniqueid']
-          || info['ELEMENTID'] || info['ElementId'] || info['elementid']
-          || info['elementId'];
-
+      if (this._linkEnabled && this._sectionLayers.length > 0) {
+        const linkKey = this._extractLinkKey(info);
         if (linkKey) {
-          this._highlightInTileset(linkKey);
+          this._highlightInSectionLayers(linkKey);
         }
       }
     });
   }
 
   /**
-   * 在 3DTileset 中遍历所有可见 tile，找到匹配的 feature 并高亮
+   * B→A: 查询剖面图属性后在三维模型 S3M 图层中联动高亮
    */
-  _highlightInTileset(linkKey) {
-    if (!this._sectionTileset) return;
+  _querySectionAndLinkToModel(layer, smId) {
+    if (this._SECTION_DATA_URL && layer.hasQueryAttrAction) {
+      const layerName = layer._name || layer.name || '';
+      const dsName = layerName.indexOf('@') > 0 ? layerName.split('@')[0] : layerName;
+      const fullName = `${this._SECTION_DATA_SOURCE}:${dsName}`;
 
-    this._clearTileHighlight();
+      this._doSqlQuery(this._SECTION_DATA_URL, fullName, `SmID = ${smId}`, (features) => {
+        if (!features || features.length === 0) {
+          this._statusEl.textContent = `剖面图查询无结果 (SmID=${smId})`;
+          return;
+        }
 
-    const root = this._sectionTileset.root;
-    if (!root) {
-      this._statusEl.textContent = '剖面图 tileset 尚未就绪';
-      return;
-    }
+        const feat = features[0];
+        const info = this._featureToInfo(feat);
+        this._showInfo(info);
 
-    const keyStr = String(linkKey);
-    let found = false;
-
-    const searchTile = (tile) => {
-      if (found) return;
-      if (tile.content) {
-        const count = tile.content.featuresLength || 0;
-        for (let i = 0; i < count; i++) {
-          const feature = tile.content.getFeature(i);
-          const fUniqueId = this._getFeatureProperty(feature, ['UNIQUEID', 'UniqueId', 'uniqueid']);
-          const fElementId = this._getFeatureProperty(feature, ['ELEMENTID', 'ElementId', 'elementid', 'elementId']);
-
-          if ((fUniqueId && String(fUniqueId) === keyStr) || (fElementId && String(fElementId) === keyStr)) {
-            feature.color = Cesium.Color.YELLOW.withAlpha(0.7);
-            this._lastHighlightedFeature = feature;
-            found = true;
-            this._statusEl.textContent = `已在剖面图中高亮匹配对象 (key=${keyStr})`;
-            return;
+        if (this._linkEnabled) {
+          const linkKey = this._extractLinkKey(info);
+          if (linkKey) {
+            this._highlightInModelByKey(linkKey);
           }
         }
+      });
+    } else {
+      this._showBasicInfo(layer, { id: smId });
+      if (this._linkEnabled) {
+        this._statusEl.textContent = '剖面图数据服务未配置，联动不可用';
+        console.info('剖面图联动需要配置 SECTION_DATA_URL');
       }
-      if (tile.children) {
-        for (const child of tile.children) {
-          searchTile(child);
-          if (found) return;
-        }
-      }
-    };
-
-    searchTile(root);
-
-    if (!found) {
-      this._statusEl.textContent = `剖面图中未找到匹配对象 (key=${keyStr})`;
     }
   }
 
   /**
-   * B→A: 通过属性键值在 S3M 模型图层中查找并高亮
+   * 在剖面图 S3M 图层中，通过 UNIQUEID 查找并高亮
+   */
+  _highlightInSectionLayers(linkKey) {
+    if (this._sectionLayers.length === 0) return;
+
+    if (!this._SECTION_DATA_URL) {
+      this._statusEl.textContent = '剖面图数据服务未配置，无法联动高亮';
+      return;
+    }
+
+    this._statusEl.textContent = `正在剖面图中查找 (key=${linkKey})...`;
+    const keyStr = String(linkKey);
+
+    for (const layer of this._sectionLayers) {
+      const layerName = layer._name || layer.name || '';
+      const dsName = layerName.indexOf('@') > 0 ? layerName.split('@')[0] : layerName;
+      const fullName = `${this._SECTION_DATA_SOURCE}:${dsName}`;
+      const filter = `UNIQUEID = '${keyStr}'`;
+
+      this._doSqlQuery(this._SECTION_DATA_URL, fullName, filter, (features) => {
+        if (features && features.length > 0) {
+          const feat = features[0];
+          const smId = this._extractSmId(feat);
+          if (smId !== null && layer.setSelection) {
+            layer.setSelection([smId]);
+            this._statusEl.textContent = `已在剖面图中高亮 (图层: ${dsName}, SmID=${smId})`;
+          }
+        }
+      });
+    }
+  }
+
+  /**
+   * B→A: 通过属性键值在三维模型 S3M 图层中查找并高亮
    */
   _highlightInModelByKey(linkKey) {
     if (this._modelLayers.length === 0) return;
@@ -261,13 +225,13 @@ export class PickLinker {
     for (const ds of this._DATASETS) {
       const fullName = `${this._DATA_SOURCE}:${ds}`;
 
-      this._doSqlQuery(fullName, filterByUniqueId, (features) => {
+      this._doSqlQuery(this._DATA_URL, fullName, filterByUniqueId, (features) => {
         if (features && features.length > 0) {
           this._highlightModelFeature(features[0], ds, keyStr);
           return;
         }
 
-        this._doSqlQuery(fullName, filterByElementId, (features2) => {
+        this._doSqlQuery(this._DATA_URL, fullName, filterByElementId, (features2) => {
           if (features2 && features2.length > 0) {
             this._highlightModelFeature(features2[0], ds, keyStr);
           }
@@ -277,14 +241,7 @@ export class PickLinker {
   }
 
   _highlightModelFeature(feat, datasetName, linkKey) {
-    let smId = null;
-    for (let i = 0; i < feat.fieldNames.length; i++) {
-      if (feat.fieldNames[i].toUpperCase() === 'SMID') {
-        smId = parseInt(feat.fieldValues[i]);
-        break;
-      }
-    }
-
+    const smId = this._extractSmId(feat);
     if (smId === null) return;
 
     const dsClean = datasetName.replace('_dongchesuo', '').toLowerCase();
@@ -307,34 +264,34 @@ export class PickLinker {
     this._statusEl.textContent = `已在三维模型中高亮 (SmID=${smId}, key=${linkKey})`;
   }
 
-  _getFeatureProperty(feature, candidates) {
-    for (const key of candidates) {
-      try {
-        const val = feature.getProperty(key);
-        if (val !== undefined && val !== null) return val;
-      } catch (_) {}
+  _extractLinkKey(info) {
+    return info['UNIQUEID'] || info['UniqueId'] || info['uniqueid']
+      || info['ELEMENTID'] || info['ElementId'] || info['elementid']
+      || info['elementId'] || null;
+  }
+
+  _extractSmId(feat) {
+    if (feat.fieldNames && feat.fieldValues) {
+      for (let i = 0; i < feat.fieldNames.length; i++) {
+        if (feat.fieldNames[i].toUpperCase() === 'SMID') {
+          return parseInt(feat.fieldValues[i]);
+        }
+      }
     }
+    if (feat.data && feat.data.SMID !== undefined) return parseInt(feat.data.SMID);
+    if (feat.attributes && feat.attributes.SMID !== undefined) return parseInt(feat.attributes.SMID);
     return null;
   }
 
-  _clearTileHighlight() {
-    if (this._lastHighlightedFeature) {
-      try {
-        this._lastHighlightedFeature.color = Cesium.Color.WHITE;
-      } catch (_) {}
-      this._lastHighlightedFeature = null;
-    }
-  }
-
-  _matchDataset(layer) {
+  _matchDataset(layer, datasets) {
     const layerName = (layer._name || layer.name || '').toLowerCase();
-    for (const ds of this._DATASETS) {
+    for (const ds of datasets) {
       const dsClean = ds.replace('_dongchesuo', '').toLowerCase();
       if (layerName.indexOf(dsClean) !== -1 || dsClean.indexOf(layerName) !== -1) {
         return ds;
       }
     }
-    return this._DATASETS.length > 1 ? this._DATASETS[1] : this._DATASETS[0];
+    return datasets.length > 1 ? datasets[1] : datasets[0];
   }
 
   clearAllSelection() {
@@ -345,7 +302,12 @@ export class PickLinker {
       } catch (_) {}
     }
 
-    this._clearTileHighlight();
+    for (const layer of this._sectionLayers) {
+      try {
+        if (layer.releaseSelection) layer.releaseSelection();
+        if (layer.setSelection) layer.setSelection([]);
+      } catch (_) {}
+    }
 
     this._infoPanelEl.style.display = 'none';
     this._statusEl.textContent = '已清除拾取';
@@ -400,7 +362,12 @@ export class PickLinker {
     return info;
   }
 
-  _doSqlQuery(datasetName, filter, onSuccess) {
+  _doSqlQuery(serviceUrl, datasetName, filter, onSuccess) {
+    if (!serviceUrl) {
+      onSuccess([]);
+      return;
+    }
+
     try {
       const getFeatureParam = new SuperMap.REST.FilterParameter({
         attributeFilter: filter,
@@ -411,7 +378,7 @@ export class PickLinker {
         datasetNames: [datasetName],
         returnContent: true,
       });
-      const service = new SuperMap.REST.GetFeaturesBySQLService(this._DATA_URL, {
+      const service = new SuperMap.REST.GetFeaturesBySQLService(serviceUrl, {
         eventListeners: {
           processCompleted: (resultSet) => {
             if (resultSet.result && resultSet.result.features && resultSet.result.features.length > 0) {

@@ -315,6 +315,26 @@ html, body {
   background: rgba(233, 69, 96, 0.4);
 }
 
+.layer-item.layer-master {
+  padding-left: 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.layer-item.layer-sub {
+  padding-left: 36px;
+}
+
+.layer-type-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #888;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 /* ── 属性信息面板 ── */
 .info-panel {
   position: fixed;

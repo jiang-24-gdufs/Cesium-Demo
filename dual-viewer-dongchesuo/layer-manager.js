@@ -2,14 +2,14 @@
  * LayerManager - 图层管理面板
  *
  * - 三维模型组 (ViewerA): 超图 S3M 图层列表
- * - 剖面图组 (ViewerB): CesiumION 3DTileset
+ * - 剖面图组 (ViewerB): 超图 S3M 图层列表（realspace 剖面场景）
  */
 export class LayerManager {
   constructor(sceneA, sceneB) {
     this._sceneA = sceneA;
     this._sceneB = sceneB;
     this._modelLayers = [];
-    this._sectionTileset = null;
+    this._sectionLayers = [];
 
     this._modelListEl = document.getElementById('model-layer-list');
     this._sectionListEl = document.getElementById('section-layer-list');
@@ -47,35 +47,56 @@ export class LayerManager {
   setModelLayers(layers) {
     this._modelLayers = layers || [];
     this._modelCountEl.textContent = this._modelLayers.length;
-    this._renderS3MLayerList(this._modelListEl, this._modelLayers, this._sceneA);
+    this._renderS3MLayerList(this._modelListEl, this._modelLayers, this._sceneA, 'model');
   }
 
-  setSectionTileset(tileset) {
-    this._sectionTileset = tileset;
-    this._sectionCountEl.textContent = '1';
-    this._renderTilesetEntry(this._sectionListEl, tileset);
-  }
-
-  // 向后兼容
   setSectionLayers(layers) {
-    if (layers && layers.length > 0) {
-      this._sectionCountEl.textContent = layers.length;
-    }
+    this._sectionLayers = layers || [];
+    this._sectionCountEl.textContent = this._sectionLayers.length;
+    this._renderS3MLayerList(this._sectionListEl, this._sectionLayers, this._sceneB, 'section');
   }
 
-  _renderS3MLayerList(ulEl, layers, scene) {
+  _renderS3MLayerList(ulEl, layers, scene, group) {
     ulEl.innerHTML = '';
     if (!layers || layers.length === 0) {
       ulEl.innerHTML = '<li class="layer-item" style="color:#666;">无图层</li>';
       return;
     }
 
+    // 总控行（仅剖面图组，因为图层数量可能较多）
+    if (group === 'section' && layers.length > 1) {
+      const masterLi = document.createElement('li');
+      masterLi.className = 'layer-item layer-master';
+
+      const masterCb = document.createElement('input');
+      masterCb.type = 'checkbox';
+      masterCb.checked = true;
+      masterCb.className = 'layer-cb';
+      masterCb.addEventListener('change', () => {
+        for (const layer of layers) {
+          layer.visible = masterCb.checked;
+        }
+        ulEl.querySelectorAll('.layer-sub .layer-cb').forEach((cb) => {
+          cb.checked = masterCb.checked;
+        });
+      });
+
+      const masterName = document.createElement('span');
+      masterName.className = 'layer-name';
+      masterName.style.fontWeight = '600';
+      masterName.textContent = `全部剖面图层 (${layers.length})`;
+
+      masterLi.appendChild(masterCb);
+      masterLi.appendChild(masterName);
+      ulEl.appendChild(masterLi);
+    }
+
     for (let i = 0; i < layers.length; i++) {
       const layer = layers[i];
-      const name = this._getS3MDisplayName(layer, i);
+      const name = this._getS3MDisplayName(layer, i, group);
 
       const li = document.createElement('li');
-      li.className = 'layer-item';
+      li.className = group === 'section' ? 'layer-item layer-sub' : 'layer-item';
 
       const cb = document.createElement('input');
       cb.type = 'checkbox';
@@ -103,67 +124,22 @@ export class LayerManager {
     }
   }
 
-  _renderTilesetEntry(ulEl, tileset) {
-    ulEl.innerHTML = '';
-
-    const li = document.createElement('li');
-    li.className = 'layer-item';
-
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = tileset.show !== false;
-    cb.className = 'layer-cb';
-    cb.addEventListener('change', () => { tileset.show = cb.checked; });
-
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'layer-name';
-    nameSpan.textContent = 'CesiumION 剖面图';
-    nameSpan.title = `ION Asset (3DTileset)`;
-
-    const locateBtn = document.createElement('button');
-    locateBtn.className = 'layer-locate-btn';
-    locateBtn.textContent = '定位';
-    locateBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this._flyToTileset(tileset);
-    });
-
-    li.appendChild(cb);
-    li.appendChild(nameSpan);
-    li.appendChild(locateBtn);
-    ulEl.appendChild(li);
-  }
-
-  _flyToTileset(tileset) {
-    const statusEl = document.getElementById('status-text');
-    try {
-      if (tileset.boundingSphere) {
-        const offset = new Cesium.HeadingPitchRange(
-          Cesium.Math.toRadians(0),
-          Cesium.Math.toRadians(-45),
-          tileset.boundingSphere.radius * 2.5
-        );
-        this._sceneB.camera.flyToBoundingSphere(tileset.boundingSphere, {
-          offset,
-          duration: 1.5,
-        });
-        statusEl.textContent = '已定位到剖面图';
-      } else {
-        statusEl.textContent = '剖面图无范围信息';
-      }
-    } catch (e) {
-      statusEl.textContent = `定位失败: ${e.message || e}`;
-    }
-  }
-
-  _getS3MDisplayName(layer, index) {
+  _getS3MDisplayName(layer, index, group) {
     const name = layer._name || layer.name || '';
     if (name && name !== 's3md' && name !== '') {
-      return name
+      let display = name
         .replace(/@[^@]+$/, '')
         .replace(/_dongchesuo/g, '')
         .replace(/_/g, ' ')
-        .trim() || `图层_${index}`;
+        .trim();
+
+      if (group === 'section') {
+        display = display
+          .replace(/dongchesuo[_ ]?poumian[_ ]?/gi, '')
+          .trim();
+      }
+
+      return display || `图层_${index}`;
     }
     if (layer._groupName) return layer._groupName;
     return `图层_${index}`;
@@ -213,5 +189,5 @@ export class LayerManager {
   }
 
   get modelLayers() { return this._modelLayers; }
-  get sectionTileset() { return this._sectionTileset; }
+  get sectionLayers() { return this._sectionLayers; }
 }
