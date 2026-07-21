@@ -470,6 +470,18 @@ html, body {
   letter-spacing: 0.3px;
 }
 
+.status-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-divider {
+  color: rgba(255, 255, 255, 0.2);
+  font-size: 11px;
+}
+
+#ol-camera-info,
 #camera-info {
   font-family: 'Consolas', 'Monaco', monospace;
   font-size: 11px;

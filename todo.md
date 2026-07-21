@@ -409,3 +409,90 @@ content_main.js:4847 This page uses Chrome's Built-In AI features (LanguageDetec
 ---
 补充iServer预览使用的html： iServer.html
 
+---
+1. 完善视角重置交互
+- Cesium
+- OpenLayers 视角没有还原；
+- 补充ol地图相机相关的信息到底部bar中
+2. 属性查询联动交互逻辑补充说明：
+现在属性查询都能检索到"ElementID	419754" 能不能新增一个拾取后正确定位+高亮对向场景要素的功能交互
+
+3. 现在联动需要先固定为"ElementID"这个key
+二维拾取结果
+```
+{
+    "BottomAttitude": 3.7,
+    "CategoryID": -2001300,
+    "ElementID": 433053,
+    "ElementName": "检查井",
+    "Height": 2.2,
+    "IFC_预定义类型": "",
+    "IfcGUID": "3cqCv_QDb0yxvnu14fwU7V",
+    "SmBimInfo": "1F-0.000#*#*#结构基础#*#*#检查井#*#*#检查井#*#*#检查井[433053]",
+    "SmUserID": 0,
+    "UniqueID": "e6d0ce7e-68d9-40f3-be71-e01129ef7a42-00069b9d",
+    "体积": 1.354092,
+    "创建的阶段": "新构造",
+    "导出到_IFC": 0,
+    "导出到_IFC_作为": "",
+    "底部偏移": -3.1,
+    "底部标高": "1F-0.000",
+    "底部高程": 3.7,
+    "底部高程测量": 3.7,
+    "族": "检查井",
+    "族与类型": "检查井 : 检查井",
+    "标高": "1F-0.000",
+    "类别": "结构基础",
+    "类型": "检查井",
+    "类型_ID": 428611,
+    "长度": 2.1,
+    "面积": 3.2864,
+    "顶部偏移": -1,
+    "顶部标高": "1F-0.000",
+    "顶部高程": 5.9,
+    "顶部高程测量": 5.9,
+    "layer": "result_modelToRegion_smallobject@dongchesuo-merge-rvt-geo"
+}
+```
+
+三维拾取结果：
+```
+{
+    "SMID": "106",
+    "SMUSERID": "0",
+    "SMMAXZ": "6.07681942731142",
+    "SMMINZ": "3.8763575898483396",
+    "SMINDEXKEY": "AAHmEAAARaTj4fMCgD/ntR9tooyGPyIgDq0rCoA/zhtl0uaThj98AwAAAAEAAAAFAAAARaTj4fMCgD/OG2XS5pOGPyIgDq0rCoA/zhtl0uaThj8iIA6tKwqAP+e1H22ijIY/RaTj4fMCgD/ntR9tooyGP0Wk4+HzAoA/zhtl0uaThj/+",
+    "SMBIMINFO": "1F-0.000#*#*#结构基础#*#*#检查井#*#*#检查井#*#*#检查井[433053]",
+    "ELEMENTID": "433053",
+    "ELEMENTNAME": "检查井",
+    "CATEGORYID": "-2001300",
+    "UNIQUEID": "e6d0ce7e-68d9-40f3-be71-e01129ef7a42-00069b9d",
+    "类别": "结构基础",
+    "导出到_IFC": "0",
+    "IFCGUID": "3cqCv_QDb0yxvnu14fwU7V",
+    "体积": "1.354092",
+    "面积": "3.2864",
+    "创建的阶段": "新构造",
+    "顶部偏移": "-1.0",
+    "底部偏移": "-3.1",
+    "顶部标高": "1F-0.000",
+    "底部标高": "1F-0.000",
+    "标高": "1F-0.000",
+    "族与类型": "检查井 : 检查井",
+    "族": "检查井",
+    "类型": "检查井",
+    "类型_ID": "428611",
+    "底部高程测量": "3.7",
+    "顶部高程测量": "5.9",
+    "顶部高程": "5.9",
+    "长度": "2.1",
+    "底部高程": "3.7",
+    "启用分析模型": "true",
+    "随轴网移动": "true"
+}
+```
+
+现在联动的交互实际情况为：
+- 拾取二维的要素，属性查询成功，三维场景只有视角切换，而且也没有正确高亮部件；
+- 拾取三维的构建，属性查询成功，二维场景随缩放后脱离了原始的地图范围，高亮点打在一个没有任何意义的位置

@@ -250,7 +250,18 @@ function setupHighlightLayer() {
     source: mvtLayer.getSource(),
     declutter: true,
     style: function (feature) {
+      var matched = false;
       if (highlightedFeatureId !== null && feature.getId() === highlightedFeatureId) {
+        matched = true;
+      }
+      if (!matched && highlightedAttr) {
+        var props = feature.getProperties();
+        var val = props[highlightedAttr.name] || props[highlightedAttr.name.toUpperCase()] || props[highlightedAttr.name.toLowerCase()];
+        if (val !== undefined && String(val) === highlightedAttr.value) {
+          matched = true;
+        }
+      }
+      if (matched) {
         return new ol.style.Style({
           stroke: new ol.style.Stroke({ color: '#ff4757', width: 3 }),
           fill: new ol.style.Fill({ color: 'rgba(255, 71, 87, 0.3)' }),
@@ -283,11 +294,27 @@ function initAfterMapCreated() {
   syncController = new CesiumOpenLayersSyncController(viewer3D, map2D);
   console.log('[Init] 联动控制器初始化完成');
 
+  // 记录 OL 初始视角
+  var view = map2D.getView();
+  initialOLView = {
+    center: view.getCenter() ? view.getCenter().slice() : null,
+    zoom: view.getZoom(),
+    resolution: view.getResolution(),
+    rotation: view.getRotation(),
+  };
+  console.log('[Init] OL 初始视角已记录:', initialOLView);
+
   // 二维拾取绑定
   map2D.on('click', onMap2DClick);
 
   // 分割线拖拽 - resize
   map2D.updateSize();
+
+  // OL 视角变化时更新底部状态栏
+  view.on('change:center', updateOLCameraInfo);
+  view.on('change:resolution', updateOLCameraInfo);
+  view.on('change:rotation', updateOLCameraInfo);
+  updateOLCameraInfo();
 
   // 活跃源追踪
   syncController.onActiveSourceChange(function (sourceId) {
@@ -303,6 +330,7 @@ function initAfterMapCreated() {
 
 let sceneLayers = [];
 let initialCamera = null;
+let initialOLView = null;
 
 function loadModelScene() {
   console.log('[3D] 开始加载三维模型场景:', MODEL_SERVICE_URL, '场景:', MODEL_SCENE_NAME);
@@ -593,10 +621,12 @@ function featureToInfo(feat) {
 }
 
 function extractLinkKey(info) {
-  var directKey = info['UNIQUEID'] || info['UniqueId'] || info['uniqueid']
-    || info['ELEMENTID'] || info['ElementId'] || info['elementid']
-    || info['elementId'];
-  if (directKey) return directKey;
+  // 优先使用 ElementID 作为联动 key（数值型，跨二三维一致）
+  var elementId = info['ElementID'] || info['ELEMENTID'] || info['ElementId'] || info['elementid'] || info['elementId'];
+  if (elementId) return String(elementId);
+
+  var uniqueId = info['UNIQUEID'] || info['UniqueId'] || info['uniqueid'];
+  if (uniqueId) return uniqueId;
 
   var blockName = info['BlockName'] || info['blockName'] || info['BLOCKNAME'];
   if (blockName) {
@@ -679,24 +709,122 @@ function doHighlight3D(feat, datasetName, linkKey) {
   var smId = extractSmId(feat);
   if (smId === null) return;
   var dsClean = datasetName.replace('_dongchesuo', '').toLowerCase();
+  var targetLayer = null;
+
   for (var i = 0; i < sceneLayers.length; i++) {
     var layer = sceneLayers[i];
     var layerName = (layer._name || layer.name || '').toLowerCase();
     if (layerName.indexOf(dsClean) !== -1 || dsClean.indexOf(layerName) !== -1) {
-      if (layer.setSelection) {
-        layer.setSelection([smId]);
-        console.log('[Pick→3D] 已高亮三维图层 "' + layer._name + '", SmID=' + smId + ', key=' + linkKey);
-        statusEl.textContent = '已在三维模型中高亮 (SmID=' + smId + ', key=' + linkKey + ')';
+      targetLayer = layer;
+      break;
+    }
+  }
+
+  // 如果未匹配到特定图层，尝试所有图层
+  if (!targetLayer) {
+    for (var j = 0; j < sceneLayers.length; j++) {
+      if (sceneLayers[j].setSelection) {
+        try { sceneLayers[j].setSelection([smId]); } catch (_) {}
       }
-      return;
     }
+  } else if (targetLayer.setSelection) {
+    targetLayer.setSelection([smId]);
+    console.log('[Pick→3D] 已高亮三维图层 "' + (targetLayer._name || '?') + '", SmID=' + smId + ', key=' + linkKey);
   }
-  for (var j = 0; j < sceneLayers.length; j++) {
-    if (sceneLayers[j].setSelection) {
-      try { sceneLayers[j].setSelection([smId]); } catch (_) {}
+
+  // 计算要素中心经纬度
+  var geomCenter = extractFeatureCenter(feat);
+
+  // 飞行定位到要素几何位置
+  if (geomCenter) {
+    viewer3D.scene.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(geomCenter[0], geomCenter[1], (geomCenter[2] || 0) + 150),
+      orientation: {
+        heading: Cesium.Math.toRadians(0),
+        pitch: Cesium.Math.toRadians(-45),
+        roll: 0,
+      },
+      duration: 1.2,
+    });
+    console.log('[Pick→3D] 飞行定位: lng=' + geomCenter[0].toFixed(6) + ', lat=' + geomCenter[1].toFixed(6) + ', key=' + linkKey);
+
+    // 添加标注点
+    if (syncController) {
+      syncController.clearPickEntity3D();
+      syncController.showPickEntity3D(geomCenter[0], geomCenter[1], geomCenter[2] || 0, 'ID:' + linkKey);
     }
+  } else if (targetLayer && targetLayer._boundingSphere && targetLayer._boundingSphere.center &&
+      !Cesium.Cartesian3.equals(targetLayer._boundingSphere.center, Cesium.Cartesian3.ZERO)) {
+    var offset = new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), targetLayer._boundingSphere.radius * 1.5);
+    viewer3D.scene.camera.flyToBoundingSphere(targetLayer._boundingSphere, { offset: offset, duration: 1.2 });
+    console.log('[Pick→3D] 无精确坐标，飞行定位到图层包围球, key=' + linkKey);
   }
-  statusEl.textContent = '已在三维模型中高亮 (SmID=' + smId + ', key=' + linkKey + ')';
+
+  statusEl.textContent = '已在三维模型中定位+高亮 (SmID=' + smId + ', key=' + linkKey + ')';
+}
+
+
+function extractFeatureCenter(feat) {
+  // iServer 返回的坐标是 EPSG:3857 墨卡托投影坐标（单位：米），需要转换为经纬度
+  var projCoord = extractFeatureProjCoord(feat);
+  if (!projCoord) return null;
+
+  // 墨卡托 → 经纬度
+  var lonlat = mercatorToLonLat(projCoord[0], projCoord[1]);
+  return [lonlat[0], lonlat[1], projCoord[2] || 0];
+}
+
+function extractFeatureProjCoord(feat) {
+  // 从 iServer feature 中提取投影坐标（EPSG:3857 墨卡托，单位米）
+  if (feat.geometry && feat.geometry.center) {
+    return [feat.geometry.center.x, feat.geometry.center.y, feat.geometry.center.z || 0];
+  }
+  if (feat.geometry && feat.geometry.points && feat.geometry.points.length > 0) {
+    var pts = feat.geometry.points;
+    var sumX = 0, sumY = 0, sumZ = 0;
+    for (var i = 0; i < pts.length; i++) {
+      sumX += pts[i].x;
+      sumY += pts[i].y;
+      sumZ += (pts[i].z || 0);
+    }
+    return [sumX / pts.length, sumY / pts.length, sumZ / pts.length];
+  }
+  if (feat.fieldNames && feat.fieldValues) {
+    var fields = {};
+    for (var fi = 0; fi < feat.fieldNames.length; fi++) {
+      fields[feat.fieldNames[fi].toUpperCase()] = feat.fieldValues[fi];
+    }
+
+    // 优先 SmX/SmY
+    if (fields['SMX'] && fields['SMY']) {
+      var x = parseFloat(fields['SMX']);
+      var y = parseFloat(fields['SMY']);
+      var z = fields['SMZ'] ? parseFloat(fields['SMZ']) : 0;
+      if (!isNaN(x) && !isNaN(y) && Math.abs(x) > 1) return [x, y, z];
+    }
+
+    // fallback: 使用 SMSDRI 范围字段的中心
+    if (fields['SMSDRIW'] && fields['SMSDRIE'] && fields['SMSDRIN'] && fields['SMSDRIS']) {
+      var cx = (parseFloat(fields['SMSDRIW']) + parseFloat(fields['SMSDRIE'])) / 2;
+      var cy = (parseFloat(fields['SMSDRIN']) + parseFloat(fields['SMSDRIS'])) / 2;
+      var cz = 0;
+      if (fields['SMMINZ'] && fields['SMMAXZ']) {
+        cz = (parseFloat(fields['SMMINZ']) + parseFloat(fields['SMMAXZ'])) / 2;
+      }
+      if (!isNaN(cx) && !isNaN(cy) && Math.abs(cx) > 1) return [cx, cy, cz];
+    }
+
+    // fallback: 使用 SMMAXZ/SMMINZ 获取高度，但无 XY 则放弃
+  }
+  return null;
+}
+
+function mercatorToLonLat(mx, my) {
+  // EPSG:3857 墨卡托坐标 → EPSG:4326 经纬度
+  var lon = (mx / 20037508.342789244) * 180;
+  var lat = (my / 20037508.342789244) * 180;
+  lat = (180 / Math.PI) * (2 * Math.atan(Math.exp(lat * Math.PI / 180)) - Math.PI / 2);
+  return [lon, lat];
 }
 
 // ── 三维拾取 ──
@@ -752,31 +880,104 @@ pickHandler3D.setInputAction(function (event) {
 }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
 function linkPick3Dto2D(screenPos, info, smId) {
+  var elementId = info ? (info['ELEMENTID'] || info['ElementId'] || info['elementId']) : null;
+  var linkField = elementId ? ('ELEMENTID=' + elementId) : ('SmID=' + smId);
+
+  // 优先通过数据服务查询要素的投影坐标（更精确），fallback 用 pickPosition
+  if (elementId) {
+    queryFeatureCoordFor2D(elementId, function (olCoord) {
+      if (olCoord) {
+        console.log('[Pick3D→2D] 通过数据服务定位二维: coord=[' + olCoord[0].toFixed(2) + ',' + olCoord[1].toFixed(2) + '], ' + linkField);
+        flyOLToCoord(olCoord);
+        highlightMVTFeatureByAttr('ElementID', elementId);
+      } else {
+        // fallback: 使用 Cesium pickPosition 转投影坐标
+        linkPick3Dto2DByScreenPos(screenPos, elementId, linkField);
+      }
+    });
+  } else {
+    linkPick3Dto2DByScreenPos(screenPos, elementId, linkField);
+  }
+}
+
+function linkPick3Dto2DByScreenPos(screenPos, elementId, linkField) {
   var cartesian = viewer3D.scene.pickPosition(screenPos);
   if (!cartesian) return;
   var carto = Cesium.Cartographic.fromCartesian(cartesian);
   var lng = Cesium.Math.toDegrees(carto.longitude);
   var lat = Cesium.Math.toDegrees(carto.latitude);
 
-  if (syncController) syncController.showPickMarker2D([lng, lat]);
-  if (map2D) map2D.getView().animate({ center: [lng, lat], duration: 500 });
+  var olCoord = ol.proj.fromLonLat([lng, lat]);
+  console.log('[Pick3D→2D] 通过屏幕坐标定位二维: lonlat=(' + lng.toFixed(6) + ',' + lat.toFixed(6) + '), proj=(' + olCoord[0].toFixed(2) + ',' + olCoord[1].toFixed(2) + '), ' + linkField);
 
-  var elementId = info ? (info['ELEMENTID'] || info['ElementId'] || info['elementId']) : null;
-  var linkField = elementId ? ('ELEMENTID=' + elementId) : ('SmID=' + smId);
-  console.log('[Pick3D→2D] 联动标记到二维: (' + lng.toFixed(6) + ', ' + lat.toFixed(6) + '), ' + linkField);
+  flyOLToCoord(olCoord);
 
   if (elementId && mvtLayer) {
-    highlightMVTFeature(elementId);
+    highlightMVTFeatureByAttr('ElementID', elementId);
   }
+}
+
+function queryFeatureCoordFor2D(elementId, callback) {
+  // 通过 iServer 数据服务查询要素的墨卡托坐标，用于精确定位 OL 地图
+  var found = false;
+  var pending = DATASETS.length;
+  var filter = 'ELEMENTID = ' + elementId;
+
+  for (var i = 0; i < DATASETS.length; i++) {
+    (function (ds) {
+      var fullName = DATA_SOURCE + ':' + ds;
+      doSqlQuery(DATA_URL, fullName, filter, function (features) {
+        pending--;
+        if (found) return;
+        if (features.length > 0) {
+          found = true;
+          var projCoord = extractFeatureProjCoord(features[0]);
+          if (projCoord) {
+            // 返回墨卡托坐标，直接用于 OL（OL 就是 EPSG:3857）
+            callback([projCoord[0], projCoord[1]]);
+          } else {
+            callback(null);
+          }
+        } else if (pending === 0) {
+          callback(null);
+        }
+      });
+    })(DATASETS[i]);
+  }
+}
+
+function flyOLToCoord(olCoord) {
+  if (!map2D) return;
+  if (syncController) syncController.showPickMarker2D(olCoord);
+
+  var view = map2D.getView();
+  var resolutions = view.getResolutions();
+  // 使用倒数第二级分辨率（较高细节），确保不超出范围
+  var maxZoomIdx = resolutions ? resolutions.length - 1 : 5;
+  var targetZoom = Math.min(maxZoomIdx, Math.max(view.getZoom() || 0, maxZoomIdx - 1));
+
+  view.animate({
+    center: olCoord,
+    zoom: targetZoom,
+    duration: 800,
+  });
 }
 
 function highlightMVTFeature(elementId) {
-  highlightedFeatureId = elementId;
+  highlightMVTFeatureByAttr('ELEMENTID', elementId);
+}
+
+function highlightMVTFeatureByAttr(attrName, attrValue) {
+  highlightedFeatureId = null;
+  highlightedAttr = { name: attrName, value: String(attrValue) };
+
   if (highlightLayer) {
     highlightLayer.changed();
-    console.log('[OL] 尝试高亮 MVT 要素: ELEMENTID=' + elementId);
+    console.log('[OL] 高亮 MVT 要素: ' + attrName + '=' + attrValue);
   }
 }
+
+var highlightedAttr = null;
 
 viewer3D.pickEvent.addEventListener(function (feature) {
   if (!pickEnabled || !feature) return;
@@ -828,15 +1029,16 @@ function onMap2DClick(evt) {
     if (syncController && syncController.pickSyncEnabled) {
       var linkKey = extractLinkKey(props);
       if (linkKey) {
-        console.log('[Pick2D→3D] 联动: key="' + linkKey + '"');
+        console.log('[Pick2D→3D] 联动定位+高亮: ElementID="' + linkKey + '"');
         highlightInModelByKey(linkKey);
       } else {
-        console.log('[Pick2D→3D] 未找到有效联动字段');
+        console.log('[Pick2D→3D] 未找到有效联动字段，尝试 SmID');
         var smIdVal = props['SmID'] || props['SMID'] || props['smid'];
         if (smIdVal) {
           highlightInModelByKey(smIdVal);
         }
       }
+      // 标注点由 doHighlight3D 中通过精确的要素几何坐标添加，这里不再重复
     }
   } else {
     console.log('[Pick2D] 未命中 MVT 要素');
@@ -903,6 +1105,7 @@ pickModeBtn.addEventListener('click', function () {
 document.getElementById('btn-clear-pick').addEventListener('click', function () {
   if (syncController) syncController.clearAllPick();
   highlightedFeatureId = null;
+  highlightedAttr = null;
   if (highlightLayer) highlightLayer.changed();
   for (var i = 0; i < sceneLayers.length; i++) {
     try {
@@ -916,18 +1119,33 @@ document.getElementById('btn-clear-pick').addEventListener('click', function () 
 });
 
 document.getElementById('btn-reset').addEventListener('click', function () {
+  // 复位 Cesium 三维视角
   if (initialCamera) {
     viewer3D.scene.camera.flyTo({
       destination: initialCamera.destination,
       orientation: initialCamera.orientation,
       duration: 1.5,
     });
-    statusEl.textContent = '已复位视角';
-    console.log('[Toolbar] 视角已复位');
+    console.log('[Toolbar] 三维视角已复位');
   } else {
-    statusEl.textContent = '初始视角未记录，等待场景加载';
-    console.warn('[Toolbar] 复位失败: 初始视角尚未记录');
+    console.warn('[Toolbar] 三维复位失败: 初始视角尚未记录');
   }
+
+  // 复位 OpenLayers 二维视角
+  if (map2D && initialOLView) {
+    var view = map2D.getView();
+    if (initialOLView.center) {
+      view.animate({
+        center: initialOLView.center,
+        zoom: initialOLView.zoom,
+        rotation: initialOLView.rotation || 0,
+        duration: 800,
+      });
+    }
+    console.log('[Toolbar] 二维视角已复位');
+  }
+
+  statusEl.textContent = '已复位视角（三维 + 二维）';
 });
 
 // 图层管理面板
@@ -992,8 +1210,22 @@ viewer3D.scene.postRender.addEventListener(function () {
   var lng = Cesium.Math.toDegrees(cam.longitude).toFixed(6);
   var lat = Cesium.Math.toDegrees(cam.latitude).toFixed(6);
   var alt = cam.height.toFixed(1);
-  cameraInfoEl.textContent = '经度:' + lng + '° 纬度:' + lat + '° 高度:' + alt + 'm';
+  cameraInfoEl.textContent = '3D 经度:' + lng + '° 纬度:' + lat + '° 高度:' + alt + 'm';
 });
+
+function updateOLCameraInfo() {
+  if (!map2D) return;
+  var view = map2D.getView();
+  var center = view.getCenter();
+  var zoom = view.getZoom();
+  var resolution = view.getResolution();
+  if (!center) return;
+  var olInfoStr = '2D 中心:[' + center[0].toFixed(2) + ', ' + center[1].toFixed(2) + '] ' +
+    'Z:' + (zoom !== undefined ? zoom.toFixed(1) : '--') + ' ' +
+    'Res:' + (resolution !== undefined ? resolution.toFixed(4) : '--');
+  var olInfoEl = document.getElementById('ol-camera-info');
+  if (olInfoEl) olInfoEl.textContent = olInfoStr;
+}
 
 // 活跃源追踪 DOM 引用（供 initAfterMapCreated 使用）
 var panelLeftEl = document.getElementById('panel-left');
