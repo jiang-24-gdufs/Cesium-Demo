@@ -365,3 +365,47 @@ RESPONSE:
     ]
 ]
 ```
+
+---
+
+我已经处理好的矢量瓦片的服务，现在提供的iServer服务相关信息：
+```
+名称：map-mvt-dongchesuo
+别名：    
+类型： 地图服务
+状态： 
+访问次数：142
+服务地址：
+ https://ct.sunrtcloud.com/iserver/services/map-mvt-dongchesuo/restjsr
+地图列表：
+dongchesuo
+浏览于 iClient for openlayers3 (with MVT) , for MapboxGL
+```
+
+iServer 使用了 openlayers 和 mapboxGL 这两个技术栈，都可以预览
+
+
+基于Cesium-leaflet-sync 这个demo 复制一份到本地，然后采用openLayers这个技术栈来实现二维拾取高亮和Cesium三维联动的功能
+---
+fix:
+```
+VM132:1 [Violation] Permissions policy violation: unload is not allowed in this document.
+app.js:25 [Init] 服务配置: 
+{三维模型: 'https://ct.sunrtcloud.com/iserver/services/3D-dongchesuotest/rest/realspace', 场景名: 'dongchesuotest', MVT服务: 'https://ct.sunrtcloud.com/iserver/services/map-mvt…/restjsr/v1/vectortile/maps/dongchesuo/style.json', 数据服务: 'https://ct.sunrtcloud.com/iserver/services/data-dongchesuotest/rest/data'}
+app.js:52 [Init] Cesium Viewer 创建完成
+app.js:67 [Init] OpenLayers Map 创建完成
+app.js:75 [OL] 开始加载 MVT 矢量瓦片: https://ct.sunrtcloud.com/iserver/services/map-mvt-dongchesuo/restjsr/v1/vectortile/maps/dongchesuo/style.json
+app.js:78 Uncaught TypeError: Cannot read properties of undefined (reading 'MapboxStyles')
+    at loadMVTLayer (app.js:78:37)
+    at app.js:174:1
+favicon.ico:1 
+ GET http://127.0.0.1:5500/favicon.ico 404 (Not Found)
+content_main.js:4847 This page uses Chrome's Built-In AI features (LanguageDetector)! We're always improving our models; please submit your feedback here: https://issues.chromium.org/issues/new?component=1583316
+```
+
+- 怎么Cesium的模型没有加载出来你搞什么，copy这个图层管理模块
+- 二维地图也没有加载出来啊 你搞什么？ 不会做就滚
+
+---
+补充iServer预览使用的html： iServer.html
+

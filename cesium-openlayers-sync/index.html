@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=Edge,chrome=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
+  <title>动车所 · 二三维联动 (Cesium + OpenLayers MVT)</title>
+
+  <!-- SuperMap iClient3D for Cesium (本地) -->
+  <link href="http://127.0.0.1:5500/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <script src="http://127.0.0.1:5500/Build/Cesium/Cesium.js"></script>
+  <script src="http://127.0.0.1:5500/examples/webgl/js/supermap/SuperMap.Include.js"></script>
+
+  <!-- OpenLayers + SuperMap iClient for OpenLayers (iServer 配套版本) -->
+  <link rel="stylesheet" href="https://ct.sunrtcloud.com/iserver/services/map-mvt-dongchesuo/restjsr/static/openlayers3ForMaps/libs/ol.min.css" type="text/css">
+  <script src="https://ct.sunrtcloud.com/iserver/services/map-mvt-dongchesuo/restjsr/static/openlayers3ForMaps/libs/ol.js"></script>
+  <script src="https://ct.sunrtcloud.com/iserver/services/map-mvt-dongchesuo/restjsr/static/openlayers3ForMaps/libs/olms.js"></script>
+  <script src="https://ct.sunrtcloud.com/iserver/services/map-mvt-dongchesuo/restjsr/static/openlayers3ForMaps/libs/iclient-ol.min.js"></script>
+
+  <link href="style.css" rel="stylesheet">
+</head>
+<body>
+
+  <!-- 顶部工具栏 -->
+  <div id="toolbar">
+    <span class="title">动车所 · 二三维联动 (Cesium + OL MVT)</span>
+    <div class="toolbar-group">
+      <button id="btn-pick-mode">拾取查询</button>
+      <button id="btn-clear-pick">清除拾取</button>
+      <button id="btn-reset">复位视角</button>
+    </div>
+    <div class="toolbar-divider"></div>
+    <div class="toolbar-group">
+      <button id="btn-layer-panel">图层管理</button>
+    </div>
+  </div>
+
+  <!-- 主容器：双屏 -->
+  <div id="main-container">
+    <div id="panel-left" class="viewer-panel">
+      <div class="panel-header">
+        <span class="panel-label">三维场景 · Cesium</span>
+      </div>
+      <div id="viewer-3d" class="cesium-container"></div>
+
+      <!-- 图层管理面板 -->
+      <div id="layer-panel" class="layer-panel collapsed">
+        <div class="layer-panel-header" id="layer-panel-toggle">
+          <span class="layer-panel-title">图层管理</span>
+          <span class="layer-panel-arrow">&#9660;</span>
+        </div>
+        <div class="layer-panel-body">
+          <div class="layer-group">
+            <div class="layer-group-header" data-group="3d">
+              <span class="group-toggle-arrow">&#9662;</span>
+              <span class="group-label">三维图层 (S3M)</span>
+              <span class="group-count" id="3d-layer-count">0</span>
+            </div>
+            <ul class="layer-list" id="3d-layer-list"></ul>
+          </div>
+          <div class="layer-group">
+            <div class="layer-group-header" data-group="2d">
+              <span class="group-toggle-arrow">&#9662;</span>
+              <span class="group-label">二维图层 (OpenLayers MVT)</span>
+              <span class="group-count" id="2d-layer-count">0</span>
+            </div>
+            <ul class="layer-list" id="2d-layer-list"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="divider"></div>
+
+    <div id="panel-right" class="viewer-panel">
+      <div class="panel-header">
+        <span class="panel-label">二维地图 · OpenLayers (MVT 矢量瓦片)</span>
+      </div>
+      <div id="viewer-2d"></div>
+    </div>
+  </div>
+
+  <!-- 属性信息面板 -->
+  <div id="info-panel" class="info-panel" style="display:none;">
+    <div class="info-panel-header">
+      <span>属性信息</span>
+      <span class="info-close" id="info-close">&times;</span>
+    </div>
+    <div class="info-panel-body" id="info-content"></div>
+  </div>
+
+  <!-- 底部状态栏 -->
+  <div id="status-bar">
+    <div class="status-left">
+      <span id="active-source-info" class="active-source-badge">活跃: --</span>
+      <span id="status-text">正在初始化...</span>
+    </div>
+    <span id="camera-info"></span>
+  </div>
+
+  <script src="sync-controller.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
