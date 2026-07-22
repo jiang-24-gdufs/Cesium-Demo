@@ -531,3 +531,24 @@ doHighlight3D 应该考虑使用后处理的方式来添加轮廓高亮，并定
 sync-controller.js:127 [SyncCtrl] S3M 高亮: layer="podao_dongchesuo@dongchesuo", SmIDs=30
 ```
 在通过key查询到数据集后，为什么这个ElementID在后续没有被使用到？为什么仅做日志使用，不应该是从这个elementid 关联到具体的三维模型中的构建对象才进行定位么，验证我的逻辑并考虑优化
+
+---
+1. 基于todo之前提供的拾取信息，应该改为uniqueid作为唯一id的字段
+2. 同时uniqueid也作为三维场景中构建定位的唯一查询id；输出查询到的三维部件到日志中辅助调试
+3. 二维地图中的拾取后添加的点可以考虑先隐藏；
+4. 二三维拾取的cursor样式应该一致；轮廓高亮效果的基础颜色应该统一为一个颜色--以三维的颜色黄色作为高亮色
+
+5. 全部删除使用elementid的逻辑，全部转向为uniqueid；
+最佳实践：将 UNIQUEID 作为你业务逻辑里的主键（Primary Key），将 SMID 仅作为 SuperMap 内部空间索引的辅助键。
+ElementID（433053）的用处：当你的业务系统需要对接 Revit 原生插件或按设计图编号检索时使用，但在 SuperMap 生态中，它不如 UNIQUEID 可靠
+6. 现在只有策略D会生效，想基于构建的包围盒boundingSphere来定位而不是targetlayer 在已经知道targetLayer以及uniqueId的情况下
+
+7. 定位包围盒位置错误
+```
+app.js:768 [Pick→3D] 构件无 SMSDRI 包围盒字段, UniqueID=0f2bb55d-4ddf-4a46-9e61-edf36dd6739b-00054203
+app.js:742 [Pick→3D] fallback 图层包围球定位, UniqueID=0f2bb55d-4ddf-4a46-9e61-edf36dd6739b-00054203
+```
+
+8. 还原拾取三维时，二维也需要正确添加飞行动画并定位的逻辑
+9. 避免在代码中出现立即执行函数，正确抽离封装；
+10. 对整个cesium-openlayers-sync模块的代码进行review，并输出review文档

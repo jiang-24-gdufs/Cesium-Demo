@@ -80,7 +80,7 @@ class CesiumOpenLayersSyncController {
       position: Cesium.Cartesian3.fromDegrees(lng, lat, height || 0),
       point: {
         pixelSize: 14,
-        color: Cesium.Color.fromCssColorString('#ff4757'),
+        color: Cesium.Color.fromCssColorString('#FFE600'),
         outlineColor: Cesium.Color.WHITE,
         outlineWidth: 2,
         heightReference: Cesium.HeightReference.NONE,
@@ -187,7 +187,9 @@ class CesiumOpenLayersSyncController {
     var radius = Math.max(diagonal / 2, 5); // 至少 5 米半径
     var bs = new Cesium.BoundingSphere(center, radius);
 
-    var cameraDistance = radius * 3.0;
+    var fov = this._viewer.scene.camera.frustum.fov || Cesium.Math.toRadians(60);
+    var optimalDist = radius / Math.tan(fov / 2) * 1.2;
+    var cameraDistance = Math.max(15, Math.min(2000, Math.max(radius * 2.5, optimalDist)));
     var offset = new Cesium.HeadingPitchRange(
       Cesium.Math.toRadians(0),
       Cesium.Math.toRadians(-40),
