@@ -62,6 +62,8 @@ var mvtStyleJson = null;
 var map2D = null;
 var mvtLayer = null;
 var highlightLayer = null;
+var outlineSource = null;
+var outlineLayer = null;
 var highlightedFeatureId = null;
 
 function getStyleResolutions(bounds) {
@@ -271,7 +273,19 @@ function setupHighlightLayer() {
     },
   });
   map2D.addLayer(highlightLayer);
-  console.log('[OL] 高亮图层已创建');
+
+  // 独立矢量轮廓图层：基于 feature 几何绘制精确轮廓线
+  outlineSource = new ol.source.Vector();
+  outlineLayer = new ol.layer.Vector({
+    source: outlineSource,
+    style: new ol.style.Style({
+      stroke: new ol.style.Stroke({ color: '#ff4757', width: 3, lineDash: [6, 4] }),
+      fill: new ol.style.Fill({ color: 'rgba(255, 71, 87, 0.12)' }),
+    }),
+    zIndex: 999,
+  });
+  map2D.addLayer(outlineLayer);
+  console.log('[OL] 高亮图层 + 轮廓图层已创建');
 }
 
 function fitToMVTExtent() {
@@ -721,7 +735,8 @@ function doHighlight3D(feat, datasetName, linkKey) {
     syncController.clearPickEntity3D();
   }
 
-  // 2. 匹配目标图层
+  // 2. 匹配目标图层 — ElementID 已在 highlightInModelByKey 中用于精确定位到
+  //    具体数据集，此处通过数据集名再关联到具体的 S3M 图层
   var dsClean = datasetName.replace('_dongchesuo', '').toLowerCase();
   var targetLayer = null;
 
@@ -734,24 +749,36 @@ function doHighlight3D(feat, datasetName, linkKey) {
     }
   }
 
+  console.log('[Pick→3D] ElementID=' + linkKey + ' → 数据集=' + datasetName + ' → SmID=' + smId +
+    ' → 三维图层=' + (targetLayer ? (targetLayer._name || '?') : '未匹配'));
+
   // 3. 高亮 — 通过 syncController 统一管理（黄色 selectedColor）
   if (targetLayer && syncController) {
     syncController.highlightS3MObject(targetLayer, [smId]);
   } else if (targetLayer && targetLayer.setSelection) {
     targetLayer.selectedColor = new Cesium.Color(1.0, 0.9, 0.0, 0.6);
     targetLayer.setSelection([smId]);
-    console.log('[Pick→3D] 已高亮三维图层 "' + (targetLayer._name || '?') + '", SmID=' + smId + ', key=' + linkKey);
   }
 
-  // 4. 定位 — 优先使用要素的 SMSDRI 包围盒精确定位
-  var fields = extractFieldsMap(feat);
+  // 4. 定位 — 优先使用三维场景自身的数据（S3M 图层 getObjsById 或包围球）
+  //    而非从数据服务返回的二维投影坐标反算
   var positioned = false;
 
-  if (syncController && fields) {
-    positioned = syncController.flyToFeatureBounds(fields, mercatorToLonLat, linkKey);
+  // 策略 A: 通过 S3M 图层自身能力获取构件包围球
+  //   SuperMap S3MTilesLayer 提供 getObjsById 可获取选中对象的精确包围信息
+  if (targetLayer && !positioned) {
+    positioned = flyToS3MObjectById(targetLayer, smId, linkKey);
   }
 
-  // fallback: 使用要素中心点定位
+  // 策略 B: fallback 到数据服务的 SMSDRI 包围盒（墨卡托→经纬度）
+  if (!positioned) {
+    var fields = extractFieldsMap(feat);
+    if (syncController && fields) {
+      positioned = syncController.flyToFeatureBounds(fields, mercatorToLonLat, linkKey);
+    }
+  }
+
+  // 策略 C: fallback 到数据服务的中心点坐标
   if (!positioned) {
     var geomCenter = extractFeatureCenter(feat);
     if (geomCenter) {
@@ -764,20 +791,93 @@ function doHighlight3D(feat, datasetName, linkKey) {
         },
         duration: 1.2,
       });
-      console.log('[Pick→3D] fallback 飞行定位: lng=' + geomCenter[0].toFixed(6) + ', lat=' + geomCenter[1].toFixed(6) + ', key=' + linkKey);
+      console.log('[Pick→3D] 策略C 数据服务中心点定位: lng=' + geomCenter[0].toFixed(6) + ', lat=' + geomCenter[1].toFixed(6) + ', key=' + linkKey);
+      positioned = true;
 
       if (syncController) {
         syncController.showPickEntity3D(geomCenter[0], geomCenter[1], geomCenter[2] || 0, 'ID:' + linkKey);
       }
-    } else if (targetLayer && targetLayer._boundingSphere && targetLayer._boundingSphere.center &&
-        !Cesium.Cartesian3.equals(targetLayer._boundingSphere.center, Cesium.Cartesian3.ZERO)) {
-      var offset = new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), targetLayer._boundingSphere.radius * 1.5);
-      viewer3D.scene.camera.flyToBoundingSphere(targetLayer._boundingSphere, { offset: offset, duration: 1.2 });
-      console.log('[Pick→3D] 无精确坐标，飞行定位到图层包围球, key=' + linkKey);
     }
   }
 
-  statusEl.textContent = '已在三维模型中定位+高亮 (SmID=' + smId + ', key=' + linkKey + ')';
+  // 策略 D: fallback 到图层包围球
+  if (!positioned && targetLayer && targetLayer._boundingSphere && targetLayer._boundingSphere.center &&
+      !Cesium.Cartesian3.equals(targetLayer._boundingSphere.center, Cesium.Cartesian3.ZERO)) {
+    var offset = new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), targetLayer._boundingSphere.radius * 1.5);
+    viewer3D.scene.camera.flyToBoundingSphere(targetLayer._boundingSphere, { offset: offset, duration: 1.2 });
+    console.log('[Pick→3D] 策略D 图层包围球定位, key=' + linkKey);
+    positioned = true;
+  }
+
+  if (!positioned) {
+    console.warn('[Pick→3D] 所有定位策略均失败, key=' + linkKey);
+  }
+
+  statusEl.textContent = '已在三维模型中定位+高亮 (SmID=' + smId + ', ElementID=' + linkKey + ')';
+}
+
+/**
+ * 通过 S3M 图层自身能力定位到选中构件
+ * 利用 setSelection 后图层内部的选中对象包围球来精确定位
+ */
+function flyToS3MObjectById(layer, smId, linkKey) {
+  // SuperMap S3MTilesLayer 在 setSelection 后，可通过 _selections 或
+  // getSelection3D 获取选中对象的精确包围球
+  // 另一种可靠方式：利用图层的 _cache 中按 id 查找 tile 的 boundingSphere
+
+  // 方法1: 尝试使用 layer.getSelectionBoundingSphere（如果 API 可用）
+  if (typeof layer.getSelectionBoundingSphere === 'function') {
+    try {
+      var bs = layer.getSelectionBoundingSphere();
+      if (bs && bs.center && !Cesium.Cartesian3.equals(bs.center, Cesium.Cartesian3.ZERO) && bs.radius > 0) {
+        var offset = new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-40), bs.radius * 3.0);
+        viewer3D.scene.camera.flyToBoundingSphere(bs, { offset: offset, duration: 1.2 });
+        console.log('[Pick→3D] 策略A(getSelectionBoundingSphere) 精确定位, SmID=' + smId + ', key=' + linkKey);
+        return true;
+      }
+    } catch (e) {
+      console.warn('[Pick→3D] getSelectionBoundingSphere 调用失败:', e);
+    }
+  }
+
+  // 方法2: 尝试使用 layer._selections 获取选中对象位置
+  if (layer._selections && layer._selections.length > 0) {
+    try {
+      for (var i = 0; i < layer._selections.length; i++) {
+        var sel = layer._selections[i];
+        if (sel && sel.boundingSphere && sel.boundingSphere.center &&
+            !Cesium.Cartesian3.equals(sel.boundingSphere.center, Cesium.Cartesian3.ZERO)) {
+          var bs = sel.boundingSphere;
+          var offset = new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-40), Math.max(bs.radius * 3.0, 20));
+          viewer3D.scene.camera.flyToBoundingSphere(bs, { offset: offset, duration: 1.2 });
+          console.log('[Pick→3D] 策略A(_selections) 精确定位, SmID=' + smId + ', radius=' + bs.radius.toFixed(1) + 'm, key=' + linkKey);
+          return true;
+        }
+      }
+    } catch (e) {
+      console.warn('[Pick→3D] _selections 访问失败:', e);
+    }
+  }
+
+  // 方法3: 利用 S3MTilesLayer 的 _queryParameter 做 scene.pick 模拟
+  // 如果图层设置了 queryParameter，可用 getQueryIds 获取到对象几何中心
+  if (typeof layer.getObjsById === 'function') {
+    try {
+      layer.getObjsById([smId], function (result) {
+        if (result && result.position) {
+          var bs = new Cesium.BoundingSphere(result.position, result.radius || 10);
+          var offset = new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-40), bs.radius * 3.0);
+          viewer3D.scene.camera.flyToBoundingSphere(bs, { offset: offset, duration: 1.2 });
+          console.log('[Pick→3D] 策略A(getObjsById) 异步定位成功, SmID=' + smId + ', key=' + linkKey);
+        }
+      });
+      return false; // 异步，不阻塞后续 fallback（但异步成功后会覆盖定位）
+    } catch (e) {
+      console.warn('[Pick→3D] getObjsById 调用失败:', e);
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -966,8 +1066,16 @@ function linkPick3Dto2DByScreenPos(screenPos, elementId, linkField) {
   }
 }
 
+/**
+ * 判断坐标是否为合法的 EPSG:3857 墨卡托坐标
+ * EPSG:3857 的 X 范围 ≈ [-20037508, 20037508]，Y 范围 ≈ [-20037508, 20037508]
+ * BIM 模型局部坐标通常只有几百~几千，可通过数量级判断
+ */
+function isValidMercatorCoord(x, y) {
+  return Math.abs(x) > 100000 && Math.abs(y) > 100000;
+}
+
 function queryFeatureCoordFor2D(elementId, callback) {
-  // 通过 iServer 数据服务查询要素的墨卡托坐标，用于精确定位 OL 地图
   var found = false;
   var pending = DATASETS.length;
   var filter = 'ELEMENTID = ' + elementId;
@@ -980,11 +1088,11 @@ function queryFeatureCoordFor2D(elementId, callback) {
         if (found) return;
         if (features.length > 0) {
           found = true;
-          var projCoord = extractFeatureProjCoord(features[0]);
+          var projCoord = extractMercatorCoordFor2D(features[0]);
           if (projCoord) {
-            // 返回墨卡托坐标，直接用于 OL（OL 就是 EPSG:3857）
             callback([projCoord[0], projCoord[1]]);
           } else {
+            console.warn('[Pick3D→2D] 数据服务返回的坐标不是有效墨卡托坐标, elementId=' + elementId);
             callback(null);
           }
         } else if (pending === 0) {
@@ -995,13 +1103,74 @@ function queryFeatureCoordFor2D(elementId, callback) {
   }
 }
 
+/**
+ * 专门为二维定位提取墨卡托坐标，增加坐标合法性校验
+ * 优先使用 SMSDRI 范围字段（确定性最高），然后 SMX/SMY，最后 geometry
+ * 对每种来源都验证是否为合法墨卡托坐标，避免 BIM 模型局部坐标被误用
+ */
+function extractMercatorCoordFor2D(feat) {
+  if (feat.fieldNames && feat.fieldValues) {
+    var fields = {};
+    for (var fi = 0; fi < feat.fieldNames.length; fi++) {
+      fields[feat.fieldNames[fi].toUpperCase()] = feat.fieldValues[fi];
+    }
+
+    // 优先: SMSDRI 包围盒中心（SuperMap 系统字段，坐标系与数据集一致）
+    if (fields['SMSDRIW'] && fields['SMSDRIE'] && fields['SMSDRIN'] && fields['SMSDRIS']) {
+      var cx = (parseFloat(fields['SMSDRIW']) + parseFloat(fields['SMSDRIE'])) / 2;
+      var cy = (parseFloat(fields['SMSDRIN']) + parseFloat(fields['SMSDRIS'])) / 2;
+      if (!isNaN(cx) && !isNaN(cy) && isValidMercatorCoord(cx, cy)) {
+        console.log('[Pick3D→2D] 使用 SMSDRI 墨卡托坐标: [' + cx.toFixed(2) + ', ' + cy.toFixed(2) + ']');
+        return [cx, cy];
+      }
+    }
+
+    // 其次: SMX/SMY（SuperMap 系统字段）
+    if (fields['SMX'] && fields['SMY']) {
+      var sx = parseFloat(fields['SMX']);
+      var sy = parseFloat(fields['SMY']);
+      if (!isNaN(sx) && !isNaN(sy) && isValidMercatorCoord(sx, sy)) {
+        console.log('[Pick3D→2D] 使用 SMX/SMY 墨卡托坐标: [' + sx.toFixed(2) + ', ' + sy.toFixed(2) + ']');
+        return [sx, sy];
+      }
+    }
+  }
+
+  // 最后: geometry（但要验证坐标范围）
+  if (feat.geometry) {
+    var gx, gy;
+    if (feat.geometry.center) {
+      gx = feat.geometry.center.x;
+      gy = feat.geometry.center.y;
+    } else if (feat.geometry.points && feat.geometry.points.length > 0) {
+      var pts = feat.geometry.points;
+      gx = 0; gy = 0;
+      for (var i = 0; i < pts.length; i++) { gx += pts[i].x; gy += pts[i].y; }
+      gx /= pts.length;
+      gy /= pts.length;
+    }
+    if (gx !== undefined && gy !== undefined && isValidMercatorCoord(gx, gy)) {
+      console.log('[Pick3D→2D] 使用 geometry 墨卡托坐标: [' + gx.toFixed(2) + ', ' + gy.toFixed(2) + ']');
+      return [gx, gy];
+    }
+  }
+
+  return null;
+}
+
 function flyOLToCoord(olCoord) {
   if (!map2D) return;
+
+  // 安全检查：坐标必须是合法墨卡托值
+  if (!isValidMercatorCoord(olCoord[0], olCoord[1])) {
+    console.error('[flyOLToCoord] 坐标不是合法墨卡托值，拒绝定位: [' + olCoord[0] + ', ' + olCoord[1] + ']');
+    return;
+  }
+
   if (syncController) syncController.showPickMarker2D(olCoord);
 
   var view = map2D.getView();
   var resolutions = view.getResolutions();
-  // 使用倒数第二级分辨率（较高细节），确保不超出范围
   var maxZoomIdx = resolutions ? resolutions.length - 1 : 5;
   var targetZoom = Math.min(maxZoomIdx, Math.max(view.getZoom() || 0, maxZoomIdx - 1));
 
@@ -1024,9 +1193,71 @@ function highlightMVTFeatureByAttr(attrName, attrValue) {
     highlightLayer.changed();
     console.log('[OL] 高亮 MVT 要素: ' + attrName + '=' + attrValue);
   }
+
+  // 从 MVT 瓦片中查找匹配 feature 并绘制轮廓
+  showOutlineFromMVT(attrName, attrValue);
 }
 
 var highlightedAttr = null;
+
+/**
+ * 从当前可见的 MVT 瓦片中检索匹配 feature 的几何，添加到独立矢量轮廓图层
+ */
+function showOutlineFromMVT(attrName, attrValue) {
+  clearOutlineLayer();
+  if (!mvtLayer || !outlineSource) return;
+
+  var strVal = String(attrValue);
+  var source = mvtLayer.getSource();
+  var tileGrid = source.getTileGrid();
+  var found = false;
+
+  source.forEachLoadedTile(tileGrid, map2D.getView().getZoom(), map2D.getView().calculateExtent(), function (tile) {
+    if (found) return;
+    var features = tile.getFeatures ? tile.getFeatures() : [];
+    for (var i = 0; i < features.length; i++) {
+      var f = features[i];
+      var props = f.getProperties();
+      var val = props[attrName] || props[attrName.toUpperCase()] || props[attrName.toLowerCase()];
+      if (val !== undefined && String(val) === strVal) {
+        addOutlineFromFeature(f);
+        found = true;
+        return;
+      }
+    }
+  });
+
+  if (!found) {
+    console.log('[OL] 未在当前瓦片中找到 ' + attrName + '=' + attrValue + ' 的几何，跳过轮廓绘制');
+  }
+}
+
+/**
+ * 从 MVT feature 提取几何并添加到轮廓图层
+ */
+function addOutlineFromFeature(mvtFeature) {
+  if (!outlineSource) return;
+  var geom = mvtFeature.getGeometry();
+  if (!geom) return;
+
+  var cloned = geom.clone();
+  var outlineFeat = new ol.Feature({ geometry: cloned });
+  outlineSource.addFeature(outlineFeat);
+  console.log('[OL] 轮廓要素已添加, 类型: ' + cloned.getType());
+}
+
+/**
+ * 直接用 OL feature 对象添加轮廓
+ */
+function showOutlineForFeature(olFeature) {
+  clearOutlineLayer();
+  if (!outlineSource || !olFeature) return;
+  addOutlineFromFeature(olFeature);
+}
+
+function clearOutlineLayer() {
+  if (outlineSource) outlineSource.clear();
+}
 
 viewer3D.pickEvent.addEventListener(function (feature) {
   if (!pickEnabled || !feature) return;
@@ -1073,6 +1304,8 @@ function onMap2DClick(evt) {
     highlightedFeatureId = feat.getId();
     if (highlightLayer) highlightLayer.changed();
 
+    showOutlineForFeature(feat);
+
     showInfoFromObject(props, '二维拾取 (MVT)');
 
     if (syncController && syncController.pickSyncEnabled) {
@@ -1093,6 +1326,7 @@ function onMap2DClick(evt) {
     console.log('[Pick2D] 未命中 MVT 要素');
     highlightedFeatureId = null;
     if (highlightLayer) highlightLayer.changed();
+    clearOutlineLayer();
     showInfoFromObject({ '位置': coordinate[0].toFixed(6) + ', ' + coordinate[1].toFixed(6), '状态': '未命中要素' }, '二维拾取');
   }
 }
@@ -1159,6 +1393,7 @@ document.getElementById('btn-clear-pick').addEventListener('click', function () 
   highlightedFeatureId = null;
   highlightedAttr = null;
   if (highlightLayer) highlightLayer.changed();
+  clearOutlineLayer();
   document.getElementById('info-panel').style.display = 'none';
   statusEl.textContent = '已清除拾取';
   console.log('[Toolbar] 已清除所有拾取');
