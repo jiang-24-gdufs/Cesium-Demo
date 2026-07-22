@@ -566,6 +566,63 @@ html, body {
   background: #ccc;
 }
 
+/* ── Toast 通知 ── */
+.sync-toast-container {
+  position: fixed;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.sync-toast {
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  pointer-events: auto;
+  animation: toast-in 0.3s ease forwards;
+  max-width: 480px;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.sync-toast.toast-warning {
+  background: linear-gradient(135deg, #e67e22, #d35400);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.sync-toast.toast-info {
+  background: linear-gradient(135deg, #3498db, #2980b9);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.sync-toast.toast-error {
+  background: linear-gradient(135deg, #e74c3c, #c0392b);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.sync-toast.toast-out {
+  animation: toast-out 0.3s ease forwards;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes toast-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-12px); }
+}
+
 /* ── 响应式 ── */
 @media (max-width: 768px) {
   #main-container {
