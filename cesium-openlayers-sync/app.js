@@ -665,6 +665,12 @@ function highlightInModelByKey(linkKey) {
   var keyStr = String(linkKey);
   var isNumeric = /^\d+$/.test(keyStr);
 
+  // 先清除上一次的三维高亮
+  if (syncController) {
+    syncController.clearS3MHighlight(sceneLayers);
+    syncController.clearPickEntity3D();
+  }
+
   console.log('[Pick→3D] 查找: key="' + keyStr + '" (' + (isNumeric ? 'ElementID' : 'UUID') + '), 遍历 ' + DATASETS.length + ' 个数据集');
   statusEl.textContent = '正在三维模型中查找 (key=' + keyStr + ')...';
 
@@ -708,6 +714,14 @@ function highlightInModelByKey(linkKey) {
 function doHighlight3D(feat, datasetName, linkKey) {
   var smId = extractSmId(feat);
   if (smId === null) return;
+
+  // 1. 清除上一次高亮
+  if (syncController) {
+    syncController.clearS3MHighlight(sceneLayers);
+    syncController.clearPickEntity3D();
+  }
+
+  // 2. 匹配目标图层
   var dsClean = datasetName.replace('_dongchesuo', '').toLowerCase();
   var targetLayer = null;
 
@@ -720,47 +734,79 @@ function doHighlight3D(feat, datasetName, linkKey) {
     }
   }
 
-  // 如果未匹配到特定图层，尝试所有图层
-  if (!targetLayer) {
-    for (var j = 0; j < sceneLayers.length; j++) {
-      if (sceneLayers[j].setSelection) {
-        try { sceneLayers[j].setSelection([smId]); } catch (_) {}
-      }
-    }
-  } else if (targetLayer.setSelection) {
+  // 3. 高亮 — 通过 syncController 统一管理（黄色 selectedColor）
+  if (targetLayer && syncController) {
+    syncController.highlightS3MObject(targetLayer, [smId]);
+  } else if (targetLayer && targetLayer.setSelection) {
+    targetLayer.selectedColor = new Cesium.Color(1.0, 0.9, 0.0, 0.6);
     targetLayer.setSelection([smId]);
     console.log('[Pick→3D] 已高亮三维图层 "' + (targetLayer._name || '?') + '", SmID=' + smId + ', key=' + linkKey);
   }
 
-  // 计算要素中心经纬度
-  var geomCenter = extractFeatureCenter(feat);
+  // 4. 定位 — 优先使用要素的 SMSDRI 包围盒精确定位
+  var fields = extractFieldsMap(feat);
+  var positioned = false;
 
-  // 飞行定位到要素几何位置
-  if (geomCenter) {
-    viewer3D.scene.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(geomCenter[0], geomCenter[1], (geomCenter[2] || 0) + 150),
-      orientation: {
-        heading: Cesium.Math.toRadians(0),
-        pitch: Cesium.Math.toRadians(-45),
-        roll: 0,
-      },
-      duration: 1.2,
-    });
-    console.log('[Pick→3D] 飞行定位: lng=' + geomCenter[0].toFixed(6) + ', lat=' + geomCenter[1].toFixed(6) + ', key=' + linkKey);
+  if (syncController && fields) {
+    positioned = syncController.flyToFeatureBounds(fields, mercatorToLonLat, linkKey);
+  }
 
-    // 添加标注点
-    if (syncController) {
-      syncController.clearPickEntity3D();
-      syncController.showPickEntity3D(geomCenter[0], geomCenter[1], geomCenter[2] || 0, 'ID:' + linkKey);
+  // fallback: 使用要素中心点定位
+  if (!positioned) {
+    var geomCenter = extractFeatureCenter(feat);
+    if (geomCenter) {
+      viewer3D.scene.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(geomCenter[0], geomCenter[1], (geomCenter[2] || 0) + 150),
+        orientation: {
+          heading: Cesium.Math.toRadians(0),
+          pitch: Cesium.Math.toRadians(-45),
+          roll: 0,
+        },
+        duration: 1.2,
+      });
+      console.log('[Pick→3D] fallback 飞行定位: lng=' + geomCenter[0].toFixed(6) + ', lat=' + geomCenter[1].toFixed(6) + ', key=' + linkKey);
+
+      if (syncController) {
+        syncController.showPickEntity3D(geomCenter[0], geomCenter[1], geomCenter[2] || 0, 'ID:' + linkKey);
+      }
+    } else if (targetLayer && targetLayer._boundingSphere && targetLayer._boundingSphere.center &&
+        !Cesium.Cartesian3.equals(targetLayer._boundingSphere.center, Cesium.Cartesian3.ZERO)) {
+      var offset = new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), targetLayer._boundingSphere.radius * 1.5);
+      viewer3D.scene.camera.flyToBoundingSphere(targetLayer._boundingSphere, { offset: offset, duration: 1.2 });
+      console.log('[Pick→3D] 无精确坐标，飞行定位到图层包围球, key=' + linkKey);
     }
-  } else if (targetLayer && targetLayer._boundingSphere && targetLayer._boundingSphere.center &&
-      !Cesium.Cartesian3.equals(targetLayer._boundingSphere.center, Cesium.Cartesian3.ZERO)) {
-    var offset = new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), targetLayer._boundingSphere.radius * 1.5);
-    viewer3D.scene.camera.flyToBoundingSphere(targetLayer._boundingSphere, { offset: offset, duration: 1.2 });
-    console.log('[Pick→3D] 无精确坐标，飞行定位到图层包围球, key=' + linkKey);
   }
 
   statusEl.textContent = '已在三维模型中定位+高亮 (SmID=' + smId + ', key=' + linkKey + ')';
+}
+
+/**
+ * 从 iServer feature 中提取字段为大写 key 的 map
+ */
+function extractFieldsMap(feat) {
+  if (!feat) return null;
+  var fields = {};
+  if (feat.fieldNames && feat.fieldValues) {
+    for (var i = 0; i < feat.fieldNames.length; i++) {
+      fields[feat.fieldNames[i].toUpperCase()] = feat.fieldValues[i];
+    }
+    return fields;
+  }
+  if (feat.data) {
+    var keys = Object.keys(feat.data);
+    for (var j = 0; j < keys.length; j++) {
+      fields[keys[j].toUpperCase()] = feat.data[keys[j]];
+    }
+    return fields;
+  }
+  if (feat.attributes) {
+    var akeys = Object.keys(feat.attributes);
+    for (var k = 0; k < akeys.length; k++) {
+      fields[akeys[k].toUpperCase()] = feat.attributes[akeys[k]];
+    }
+    return fields;
+  }
+  return null;
 }
 
 
@@ -845,7 +891,10 @@ pickHandler3D.setInputAction(function (event) {
   console.log('[Pick3D] 命中:', { SmID: smId, layer: layerName });
   statusEl.textContent = '拾取三维对象: SmID=' + smId + ', 查询属性中...';
 
-  if (layer.setSelection && smId !== undefined && smId !== null) {
+  if (syncController && layer.setSelection && smId !== undefined && smId !== null) {
+    syncController.highlightS3MObject(layer, [smId]);
+  } else if (layer.setSelection && smId !== undefined && smId !== null) {
+    layer.selectedColor = new Cesium.Color(1.0, 0.9, 0.0, 0.6);
     layer.setSelection([smId]);
   }
 
@@ -1103,16 +1152,13 @@ pickModeBtn.addEventListener('click', function () {
 });
 
 document.getElementById('btn-clear-pick').addEventListener('click', function () {
-  if (syncController) syncController.clearAllPick();
+  if (syncController) {
+    syncController.clearAllPick();
+    syncController.clearS3MHighlight(sceneLayers);
+  }
   highlightedFeatureId = null;
   highlightedAttr = null;
   if (highlightLayer) highlightLayer.changed();
-  for (var i = 0; i < sceneLayers.length; i++) {
-    try {
-      if (sceneLayers[i].releaseSelection) sceneLayers[i].releaseSelection();
-      if (sceneLayers[i].setSelection) sceneLayers[i].setSelection([]);
-    } catch (_) {}
-  }
   document.getElementById('info-panel').style.display = 'none';
   statusEl.textContent = '已清除拾取';
   console.log('[Toolbar] 已清除所有拾取');

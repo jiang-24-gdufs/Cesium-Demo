@@ -496,3 +496,22 @@ content_main.js:4847 This page uses Chrome's Built-In AI features (LanguageDetec
 现在联动的交互实际情况为：
 - 拾取二维的要素，属性查询成功，三维场景只有视角切换，而且也没有正确高亮部件；
 - 拾取三维的构建，属性查询成功，二维场景随缩放后脱离了原始的地图范围，高亮点打在一个没有任何意义的位置
+
+---
+首先先关注二维->三维的联动交互:
+- 拾取二维联动时，三维高亮交互在高亮前应该正确清除上一次的高亮效果；高亮颜色改为黄色
+- 联动定位到三维构建时，包围盒不准确，具体体现在定位到大的构建和小的构建，他们的包围盒好像是一样的；
+
+拾取时的日志：
+```
+[Pick2D] 二维拾取位置: 12612339.644300, 2635438.456713
+app.js:1018 [Pick2D] 命中 MVT 要素: {id: 443, 字段数: 28, 字段: 'BottomAttitude, CategoryID, ElementID, ElementName…IFC_预定义类型, IfcGUID, SmBimInfo, SmUserID, UniqueID'}
+app.js:1032 [Pick2D→3D] 联动定位+高亮: ElementID="344579"
+app.js:668 [Pick→3D] 查找: key="344579" (ElementID), 遍历 15 个数据集
+Uncaught TypeError: SuperMap.Util.RequestJSONP.supermap_callbacks[1784627380601473] is not a function
+app.js:732 [Pick→3D] 已高亮三维图层 "louban_dongchesuo@dongchesuo", SmID=1, key=344579
+app.js:760 [Pick→3D] 无精确坐标，飞行定位到图层包围球, key=344579
+```
+
+doHighlight3D 应该考虑使用后处理的方式来添加轮廓高亮，并定位到瓦片；
+尝试：瓦片通过root.tile遍历来获取并定位
