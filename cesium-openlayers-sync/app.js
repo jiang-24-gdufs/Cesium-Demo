@@ -570,6 +570,8 @@ function getS3MDisplayName(layer, index) {
 
 function flyToS3MLayer(layer, layerName) {
   console.log('[Navigate] 定位到三维图层: ' + layerName);
+
+  // 优先：有效 _boundingSphere（center 非 ZERO）
   if (layer._boundingSphere && layer._boundingSphere.center &&
       !Cesium.Cartesian3.equals(layer._boundingSphere.center, Cesium.Cartesian3.ZERO)) {
     var offset = new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), layer._boundingSphere.radius * 2.5);
@@ -577,21 +579,33 @@ function flyToS3MLayer(layer, layerName) {
     statusEl.textContent = '已定位到图层: ' + layerName;
     return;
   }
+
+  // 次选：_layerBounds 矩形范围
   if (layer._layerBounds && layer._layerBounds.west !== undefined) {
     var b = layer._layerBounds;
     viewer3D.scene.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(b.west, b.south, b.east, b.north), duration: 1.5 });
     statusEl.textContent = '已定位到图层: ' + layerName;
     return;
   }
+
+  // 保底：lon/lat + fixedHeight（基于 positionUnits 判断是否为有效经纬度）
   if (layer.lon !== undefined && layer.lat !== undefined) {
-    viewer3D.scene.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(layer.lon, layer.lat, (layer.height || 0) + 500),
-      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-45), roll: 0 },
-      duration: 1.5,
-    });
-    statusEl.textContent = '已定位到图层: ' + layerName;
-    return;
+    var isValidDegree = (layer.positionUnits === 'Degree') &&
+      Math.abs(layer.lon) <= 180 && Math.abs(layer.lat) <= 90 &&
+      (Math.abs(layer.lon) > 0.001 || Math.abs(layer.lat) > 0.001);
+
+    if (isValidDegree) {
+      var fixedHeight = (layer.height || 0) + 300;
+      viewer3D.scene.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(layer.lon, layer.lat, fixedHeight),
+        orientation: { heading: 0, pitch: Cesium.Math.toRadians(-45), roll: 0 },
+        duration: 1.5,
+      });
+      statusEl.textContent = '已定位到图层: ' + layerName;
+      return;
+    }
   }
+
   statusEl.textContent = '该图层无范围信息，无法定位';
   console.warn('[Navigate] 图层 "' + layerName + '" 无范围信息');
 }
@@ -708,10 +722,10 @@ function highlightInModelByKey(uniqueId) {
         doHighlight3D(features[0], ds, keyStr);
       } else if (pending === 0 && !found) {
         console.warn('[Pick→3D] 所有数据集均未找到 UniqueID=' + keyStr);
-        showToast('未在三维数据集中找到该构件 (UniqueID=' + keyStr + ')', 'warning');
-        statusEl.textContent = '三维模型中未找到该构件';
+        showToast('该图元没有对应的BIM构件', 'warning');
+        statusEl.textContent = '该图元没有对应的BIM构件';
       }
-    });
+    }, { hasGeometry: true });
   });
 }
 
@@ -739,13 +753,6 @@ function doHighlight3D(feat, datasetName, linkKey) {
     targetLayer.setSelection([smId]);
   }
 
-  // 二维→三维定位暂时禁用，仅保留高亮联动
-  // var positioned = flyToFeaturePrecise(feat, targetLayer, linkKey);
-  // if (!positioned) {
-  //   console.warn('[Pick→3D] 所有定位策略均失败, UniqueID=' + linkKey);
-  //   showToast('构件定位失败：无法获取有效空间坐标', 'error');
-  // }
-
   statusEl.textContent = '已高亮三维构件 (SmID=' + smId + ', UniqueID=' + featUniqueId + ')';
 }
 
@@ -764,189 +771,8 @@ function matchS3MLayerByDataset(datasetName) {
   return null;
 }
 
-/**
- * 构件级精准定位（三维飞行）
- * 
- * 核心策略：利用图层包围球中心的水平坐标 + 构件的高度范围(SMMAXZ/SMMINZ)
- * 组合出构件在三维空间中的近似位置，再通过构件高度差计算适配相机距离。
- * 
- * BIM 3D 数据集查询不返回 SMSDRIW/E/N/S 和 geometry，
- * 但必定返回 SMMAXZ/SMMINZ；而 targetLayer._boundingSphere 提供了模型中心XY。
- */
-function flyToFeaturePrecise(feat, targetLayer, uniqueId) {
-  var fields = extractFieldsMap(feat);
+// flyToComponent3D 及相关辅助函数已移除 — 详见 二维联动三维定位方案总结.md
 
-  // 主策略：图层中心XY + 构件高度 SMMAXZ/SMMINZ
-  if (targetLayer && fields) {
-    var positioned = flyToLayerCenterWithHeight(targetLayer, fields, uniqueId);
-    if (positioned) return true;
-  }
-
-  // 补充策略：SMSDRI 包围盒（少数 2D 数据集可能有）
-  if (fields && flyToFeatureBoundingBox(fields, uniqueId)) return true;
-
-  // 最终 fallback：图层包围球
-  if (targetLayer && targetLayer._boundingSphere && targetLayer._boundingSphere.center &&
-      !Cesium.Cartesian3.equals(targetLayer._boundingSphere.center, Cesium.Cartesian3.ZERO)) {
-    var layerRadius = targetLayer._boundingSphere.radius;
-    var offset = new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-30), layerRadius * 2.0);
-    viewer3D.scene.camera.flyToBoundingSphere(targetLayer._boundingSphere, { offset: offset, duration: 1.5 });
-    console.warn('[Pick→3D] fallback 图层包围球定位(精度低), UniqueID=' + uniqueId);
-    return true;
-  }
-
-  return false;
-}
-
-/**
- * 利用 S3M 图层的包围球中心（水平位置）+ feature 的 SMMAXZ/SMMINZ（高度范围）
- * 构造构件级 BoundingSphere 进行精准定位
- * 
- * 原理：BIM 模型单一图层（如 louban、qiang 等）覆盖整个建筑，
- * 图层 _boundingSphere.center 是模型整体中心。
- * 而构件的 SMMINZ~SMMAXZ 是其高度范围，通过缩小包围球半径实现聚焦。
- */
-function flyToLayerCenterWithHeight(targetLayer, fields, uniqueId) {
-  if (!targetLayer._boundingSphere || !targetLayer._boundingSphere.center) return false;
-  if (Cesium.Cartesian3.equals(targetLayer._boundingSphere.center, Cesium.Cartesian3.ZERO)) return false;
-
-  var minZ = parseFloat(fields['SMMINZ']);
-  var maxZ = parseFloat(fields['SMMAXZ']);
-
-  // 必须有高度信息，否则无法做精确定位
-  if (isNaN(minZ) && isNaN(maxZ)) {
-    console.warn('[Pick→3D] 构件无 SMMINZ/SMMAXZ, UniqueID=' + uniqueId);
-    return false;
-  }
-
-  if (isNaN(minZ)) minZ = maxZ;
-  if (isNaN(maxZ)) maxZ = minZ;
-
-  // 从图层包围球中心获取经纬度（水平位置）
-  var layerCenter = targetLayer._boundingSphere.center;
-  var layerCarto = Cesium.Cartographic.fromCartesian(layerCenter);
-  var lon = Cesium.Math.toDegrees(layerCarto.longitude);
-  var lat = Cesium.Math.toDegrees(layerCarto.latitude);
-
-  // 构件中心高度
-  var centerHeight = (minZ + maxZ) / 2;
-  var heightSpan = Math.abs(maxZ - minZ);
-
-  // 构建构件位置：图层中心XY + 构件高度
-  var targetPosition = Cesium.Cartesian3.fromDegrees(lon, lat, centerHeight);
-
-  // 包围球半径：基于构件高度跨度（BIM 构件通常 1~10m 高）
-  var radius = Math.max(heightSpan * 0.8, 5);
-
-  var bs = new Cesium.BoundingSphere(targetPosition, radius);
-  var cameraDistance = computeOptimalCameraDistance(radius);
-  var offset = new Cesium.HeadingPitchRange(
-    Cesium.Math.toRadians(0),
-    Cesium.Math.toRadians(-35),
-    cameraDistance
-  );
-
-  viewer3D.scene.camera.flyToBoundingSphere(bs, { offset: offset, duration: 1.2 });
-
-  console.log('[Pick→3D] 图层中心+高度定位: (' + lon.toFixed(6) + ',' + lat.toFixed(6) +
-    '), Z=[' + minZ.toFixed(1) + '~' + maxZ.toFixed(1) + '], radius=' + radius.toFixed(1) +
-    'm, dist=' + cameraDistance.toFixed(0) + 'm, UniqueID=' + uniqueId);
-  return true;
-}
-
-/**
- * SMSDRI 包围盒定位（适用于含此字段的 2D/矢量数据集）
- */
-function flyToFeatureBoundingBox(fields, uniqueId) {
-  var w = parseFloat(fields['SMSDRIW']);
-  var e = parseFloat(fields['SMSDRIE']);
-  var n = parseFloat(fields['SMSDRIN']);
-  var s = parseFloat(fields['SMSDRIS']);
-
-  if (isNaN(w) || isNaN(e) || isNaN(n) || isNaN(s)) return false;
-  if (!isValidMercatorCoord(w, s)) return false;
-
-  var minZ = parseFloat(fields['SMMINZ']) || 0;
-  var maxZ = parseFloat(fields['SMMAXZ']) || minZ;
-
-  var sw = mercatorToLonLat(w, s);
-  var ne = mercatorToLonLat(e, n);
-
-  var points = [
-    Cesium.Cartesian3.fromDegrees(sw[0], sw[1], minZ),
-    Cesium.Cartesian3.fromDegrees(ne[0], sw[1], minZ),
-    Cesium.Cartesian3.fromDegrees(sw[0], ne[1], minZ),
-    Cesium.Cartesian3.fromDegrees(ne[0], ne[1], minZ),
-    Cesium.Cartesian3.fromDegrees(sw[0], sw[1], maxZ),
-    Cesium.Cartesian3.fromDegrees(ne[0], sw[1], maxZ),
-    Cesium.Cartesian3.fromDegrees(sw[0], ne[1], maxZ),
-    Cesium.Cartesian3.fromDegrees(ne[0], ne[1], maxZ),
-  ];
-
-  var bs = Cesium.BoundingSphere.fromPoints(points);
-  bs.radius = Math.max(bs.radius * 1.2, 5);
-
-  var cameraDistance = computeOptimalCameraDistance(bs.radius);
-  var offset = new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-30), cameraDistance);
-  viewer3D.scene.camera.flyToBoundingSphere(bs, { offset: offset, duration: 1.2 });
-
-  var centerLon = (sw[0] + ne[0]) / 2;
-  var centerLat = (sw[1] + ne[1]) / 2;
-  console.log('[Pick→3D] SMSDRI包围盒定位: center=(' + centerLon.toFixed(6) + ',' + centerLat.toFixed(6) +
-    '), Z=[' + minZ.toFixed(1) + '~' + maxZ.toFixed(1) + '], radius=' + bs.radius.toFixed(1) + 'm, UniqueID=' + uniqueId);
-  return true;
-}
-
-/**
- * 根据目标 BoundingSphere 的 radius 动态计算最佳相机观察距离
- * 目标：让物体在视口中占据约 30%~40%（参考精准定位文档 §第三步）
- */
-function computeOptimalCameraDistance(radius) {
-  var fov = viewer3D.scene.camera.frustum.fov || Cesium.Math.toRadians(60);
-  var optimalDistance = radius / Math.tan(fov / 2) * 1.2;
-  var minDistance = 15;
-  var maxDistance = 2000;
-  return Math.max(minDistance, Math.min(maxDistance, Math.max(radius * 2.5, optimalDistance)));
-}
-
-/**
- * 从 iServer feature 中提取字段为大写 key 的 map
- */
-function extractFieldsMap(feat) {
-  if (!feat) return null;
-  var fields = {};
-  if (feat.fieldNames && feat.fieldValues) {
-    for (var i = 0; i < feat.fieldNames.length; i++) {
-      fields[feat.fieldNames[i].toUpperCase()] = feat.fieldValues[i];
-    }
-    return fields;
-  }
-  if (feat.data) {
-    var keys = Object.keys(feat.data);
-    for (var j = 0; j < keys.length; j++) {
-      fields[keys[j].toUpperCase()] = feat.data[keys[j]];
-    }
-    return fields;
-  }
-  if (feat.attributes) {
-    var akeys = Object.keys(feat.attributes);
-    for (var k = 0; k < akeys.length; k++) {
-      fields[akeys[k].toUpperCase()] = feat.attributes[akeys[k]];
-    }
-    return fields;
-  }
-  return null;
-}
-
-
-
-function mercatorToLonLat(mx, my) {
-  // EPSG:3857 墨卡托坐标 → EPSG:4326 经纬度
-  var lon = (mx / 20037508.342789244) * 180;
-  var lat = (my / 20037508.342789244) * 180;
-  lat = (180 / Math.PI) * (2 * Math.atan(Math.exp(lat * Math.PI / 180)) - Math.PI / 2);
-  return [lon, lat];
-}
 
 // ── 三维拾取 ──
 var pickHandler3D = new Cesium.ScreenSpaceEventHandler(viewer3D.scene.canvas);
@@ -997,9 +823,6 @@ pickHandler3D.setInputAction(function (event) {
       } else {
         console.log('[Pick3D] 数据集查询无结果, 显示基本信息');
         showBasicPickInfo(layer, picked);
-        if (syncController && syncController.pickSyncEnabled) {
-          showToast('该三维对象无属性数据，无法联动二维', 'warning');
-        }
       }
     });
   } else {
@@ -1009,12 +832,16 @@ pickHandler3D.setInputAction(function (event) {
 
 /**
  * 三维拾取后联动二维高亮
- * @param {Cesium.Cartesian3|null} pickedCartesian - 三维拾取点的世界坐标（同步阶段获取）
+ *
+ * 通过 SQL 查询二维数据服务确认 UniqueID 是否存在对应的二维 feature：
+ * - 存在 → 设置 highlightedAttr 触发 highlightLayer 渲染高亮 + 附加轮廓线
+ * - 不存在 → toast 提示"该BIM构件没有对应的图元"
+ *
+ * @param {Cesium.Cartesian3|null} pickedCartesian - 三维拾取点的世界坐标
  * @param {Object} info - 属性信息
  * @param {number} smId - SmID
  */
 function linkPick3Dto2D(pickedCartesian, info, smId) {
-  // 清除旧的二维高亮状态
   highlightedFeatureId = null;
   highlightedAttr = null;
   if (highlightLayer) highlightLayer.changed();
@@ -1022,88 +849,30 @@ function linkPick3Dto2D(pickedCartesian, info, smId) {
   if (syncController) syncController.clearPickMarker2D();
 
   var uniqueId = info ? (info['UNIQUEID'] || info['UniqueID'] || info['UniqueId'] || info['uniqueid']) : null;
-  var linkField = uniqueId ? ('UniqueID=' + uniqueId) : ('SmID=' + smId);
+  if (!uniqueId) return;
 
-  if (!uniqueId) {
-    console.log('[Pick3D→2D] 无 UniqueID，跳过二维联动');
-    return;
-  }
+  var keyStr = String(uniqueId);
+  var filter = "UNIQUEID = '" + keyStr + "'";
+  var found = false;
+  var pending = DATASETS.length;
 
-  // 立即设置高亮属性（不依赖飞行/定位），触发 highlightLayer 在当前视野渲染时匹配
-  highlightedAttr = { name: 'UniqueID', value: String(uniqueId) };
-  if (highlightLayer) highlightLayer.changed();
-  console.log('[Pick3D→2D] 设置二维高亮属性: ' + linkField);
-
-  // 尝试在当前已加载瓦片中找到并绘制轮廓
-  var foundInView = findAndOutlineMVTFeature('UniqueID', uniqueId);
-
-  if (foundInView) {
-    console.log('[Pick3D→2D] 当前视野已找到要素并高亮, ' + linkField);
-    return;
-  }
-
-  // 当前视野未找到，尝试飞行到目标位置后重试
-  var olCoord = null;
-  if (pickedCartesian) {
-    var carto = Cesium.Cartographic.fromCartesian(pickedCartesian);
-    var lng = Cesium.Math.toDegrees(carto.longitude);
-    var lat = Cesium.Math.toDegrees(carto.latitude);
-    olCoord = ol.proj.fromLonLat([lng, lat]);
-  }
-
-  if (olCoord && isValidMercatorCoord(olCoord[0], olCoord[1])) {
-    console.log('[Pick3D→2D] 飞行到拾取位置后重试高亮, ' + linkField);
-    flyOLToCoord(olCoord, {
-      onComplete: function () {
-        retryHighlightMVTFeature('UniqueID', uniqueId, linkField, 0);
+  DATASETS.forEach(function (ds) {
+    var fullName = DATA_SOURCE + ':' + ds;
+    doSqlQuery(DATA_URL, fullName, filter, function (features) {
+      pending--;
+      if (found) return;
+      if (features.length > 0) {
+        found = true;
+        highlightedAttr = { name: 'UniqueID', value: keyStr };
+        if (highlightLayer) highlightLayer.changed();
+        findAndOutlineMVTFeature('UniqueID', keyStr);
+        console.log('[Pick3D→2D] 二维高亮成功: UniqueID=' + keyStr + ', ds=' + ds);
+      } else if (pending === 0 && !found) {
+        console.log('[Pick3D→2D] 所有数据集均无此 UniqueID: ' + keyStr);
+        showToast('该BIM构件没有对应的图元', 'warning');
       }
-    });
-  } else {
-    // 无有效坐标，依赖 highlightLayer 样式匹配（瓦片加载后自动生效）
-    console.log('[Pick3D→2D] 无飞行坐标，依赖 highlightLayer 自动匹配, ' + linkField);
-  }
-}
-
-/**
- * 飞行到二维坐标并在瓦片加载完成后执行高亮
- * 解决飞行后 MVT 瓦片尚未加载导致高亮失败的时序问题
- */
-function flyOLToCoordAndHighlight(olCoord, attrName, attrValue, linkField) {
-  flyOLToCoord(olCoord, {
-    onComplete: function () {
-      retryHighlightMVTFeature(attrName, attrValue, linkField, 0);
-    }
+    }, { hasGeometry: false, toIndex: 0 });
   });
-}
-
-/**
- * 带重试的 MVT 要素高亮
- * 飞行后瓦片可能未加载完成，通过重试机制确保高亮生效
- * @param {number} attempt - 当前重试次数
- */
-function retryHighlightMVTFeature(attrName, attrValue, linkField, attempt) {
-  var MAX_RETRIES = 4;
-  var RETRY_DELAY = 400;
-
-  highlightedFeatureId = null;
-  highlightedAttr = { name: attrName, value: String(attrValue) };
-  if (highlightLayer) highlightLayer.changed();
-
-  var found = findAndOutlineMVTFeature(attrName, attrValue);
-
-  if (found) {
-    console.log('[Pick3D→2D] 二维高亮成功: ' + linkField);
-    return;
-  }
-
-  if (attempt < MAX_RETRIES) {
-    setTimeout(function () {
-      retryHighlightMVTFeature(attrName, attrValue, linkField, attempt + 1);
-    }, RETRY_DELAY);
-  } else {
-    console.warn('[Pick3D→2D] 二维无对应 MVT 要素: ' + linkField);
-    showToast('该三维构件在二维地图中无对应要素 (' + linkField + ')', 'warning');
-  }
 }
 
 /**
@@ -1144,118 +913,12 @@ function findAndOutlineMVTFeature(attrName, attrValue) {
 }
 
 /**
- * 通过已保存的三维世界坐标转换到二维地图坐标
- * @param {Cesium.Cartesian3|null} cartesian - 三维拾取的世界坐标
- */
-function linkPick3Dto2DByCartesian(cartesian, uniqueId, linkField) {
-  if (!cartesian) {
-    console.warn('[Pick3D→2D] 无三维世界坐标, ' + linkField);
-    showToast('无法将三维拾取位置映射到二维地图', 'warning');
-    return;
-  }
-  var carto = Cesium.Cartographic.fromCartesian(cartesian);
-  var lng = Cesium.Math.toDegrees(carto.longitude);
-  var lat = Cesium.Math.toDegrees(carto.latitude);
-
-  var olCoord = ol.proj.fromLonLat([lng, lat]);
-  console.log('[Pick3D→2D] 世界坐标→二维: lonlat=(' + lng.toFixed(6) + ',' + lat.toFixed(6) + '), ' + linkField);
-
-  if (uniqueId && mvtLayer) {
-    flyOLToCoordAndHighlight(olCoord, 'UniqueID', uniqueId, linkField);
-  } else {
-    flyOLToCoord(olCoord, {});
-    showToast('该三维构件无 UniqueID，无法联动二维高亮', 'warning');
-  }
-}
-
-/**
  * 判断坐标是否为合法的 EPSG:3857 墨卡托坐标
  * EPSG:3857 的 X 范围 ≈ [-20037508, 20037508]，Y 范围 ≈ [-20037508, 20037508]
  * BIM 模型局部坐标通常只有几百~几千，可通过数量级判断
  */
 function isValidMercatorCoord(x, y) {
   return Math.abs(x) > 100000 && Math.abs(y) > 100000;
-}
-
-function queryFeatureCoordFor2D(uniqueId, callback) {
-  var found = false;
-  var pending = DATASETS.length;
-  var filter = "UNIQUEID = '" + String(uniqueId) + "'";
-
-  DATASETS.forEach(function (ds) {
-    var fullName = DATA_SOURCE + ':' + ds;
-    doSqlQuery(DATA_URL, fullName, filter, function (features) {
-      pending--;
-      if (found) return;
-      if (features.length > 0) {
-        found = true;
-        var projCoord = extractMercatorCoordFor2D(features[0]);
-        if (projCoord) {
-          callback([projCoord[0], projCoord[1]]);
-        } else {
-          console.warn('[Pick3D→2D] 数据服务返回的坐标不是有效墨卡托坐标, UniqueID=' + uniqueId);
-          callback(null);
-        }
-      } else if (pending === 0) {
-        callback(null);
-      }
-    });
-  });
-}
-
-/**
- * 专门为二维定位提取墨卡托坐标，增加坐标合法性校验
- * 优先使用 SMSDRI 范围字段（确定性最高），然后 SMX/SMY，最后 geometry
- * 对每种来源都验证是否为合法墨卡托坐标，避免 BIM 模型局部坐标被误用
- */
-function extractMercatorCoordFor2D(feat) {
-  if (feat.fieldNames && feat.fieldValues) {
-    var fields = {};
-    for (var fi = 0; fi < feat.fieldNames.length; fi++) {
-      fields[feat.fieldNames[fi].toUpperCase()] = feat.fieldValues[fi];
-    }
-
-    // 优先: SMSDRI 包围盒中心（SuperMap 系统字段，坐标系与数据集一致）
-    if (fields['SMSDRIW'] && fields['SMSDRIE'] && fields['SMSDRIN'] && fields['SMSDRIS']) {
-      var cx = (parseFloat(fields['SMSDRIW']) + parseFloat(fields['SMSDRIE'])) / 2;
-      var cy = (parseFloat(fields['SMSDRIN']) + parseFloat(fields['SMSDRIS'])) / 2;
-      if (!isNaN(cx) && !isNaN(cy) && isValidMercatorCoord(cx, cy)) {
-        console.log('[Pick3D→2D] 使用 SMSDRI 墨卡托坐标: [' + cx.toFixed(2) + ', ' + cy.toFixed(2) + ']');
-        return [cx, cy];
-      }
-    }
-
-    // 其次: SMX/SMY（SuperMap 系统字段）
-    if (fields['SMX'] && fields['SMY']) {
-      var sx = parseFloat(fields['SMX']);
-      var sy = parseFloat(fields['SMY']);
-      if (!isNaN(sx) && !isNaN(sy) && isValidMercatorCoord(sx, sy)) {
-        console.log('[Pick3D→2D] 使用 SMX/SMY 墨卡托坐标: [' + sx.toFixed(2) + ', ' + sy.toFixed(2) + ']');
-        return [sx, sy];
-      }
-    }
-  }
-
-  // 最后: geometry（但要验证坐标范围）
-  if (feat.geometry) {
-    var gx, gy;
-    if (feat.geometry.center) {
-      gx = feat.geometry.center.x;
-      gy = feat.geometry.center.y;
-    } else if (feat.geometry.points && feat.geometry.points.length > 0) {
-      var pts = feat.geometry.points;
-      gx = 0; gy = 0;
-      for (var i = 0; i < pts.length; i++) { gx += pts[i].x; gy += pts[i].y; }
-      gx /= pts.length;
-      gy /= pts.length;
-    }
-    if (gx !== undefined && gy !== undefined && isValidMercatorCoord(gx, gy)) {
-      console.log('[Pick3D→2D] 使用 geometry 墨卡托坐标: [' + gx.toFixed(2) + ', ' + gy.toFixed(2) + ']');
-      return [gx, gy];
-    }
-  }
-
-  return null;
 }
 
 /**
@@ -1393,7 +1056,7 @@ function onMap2DClick(evt) {
         highlightInModelByKey(linkKey);
       } else {
         console.log('[Pick2D→3D] 未找到 UniqueID，跳过三维联动');
-        showToast('该二维要素无 UniqueID，无法联动三维定位', 'warning');
+        showToast('该图元没有对应的BIM构件', 'warning');
       }
     }
   } else {

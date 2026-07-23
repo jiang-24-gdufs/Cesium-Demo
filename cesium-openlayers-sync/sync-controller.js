@@ -150,63 +150,6 @@ class CesiumOpenLayersSyncController {
     }
   }
 
-  /**
-   * 定位到要素的精确包围盒
-   * 通过 SMSDRI 范围字段 + 高度字段计算 BoundingSphere，避免使用整个图层的包围球
-   * @param {Object} fields - 要素字段 map（key 大写）
-   * @param {Function} mercatorToLonLat - 墨卡托→经纬度转换函数
-   * @param {string} linkKey - 联动 key（仅日志用）
-   * @returns {boolean} 是否成功定位
-   */
-  flyToFeatureBounds(fields, mercatorToLonLat, linkKey) {
-    var w = parseFloat(fields['SMSDRIW']);
-    var e = parseFloat(fields['SMSDRIE']);
-    var n = parseFloat(fields['SMSDRIN']);
-    var s = parseFloat(fields['SMSDRIS']);
-
-    if (isNaN(w) || isNaN(e) || isNaN(n) || isNaN(s)) return false;
-    if (Math.abs(w) < 1 && Math.abs(e) < 1) return false;
-
-    var minZ = parseFloat(fields['SMMINZ']) || 0;
-    var maxZ = parseFloat(fields['SMMAXZ']) || minZ;
-
-    var sw = mercatorToLonLat(w, s);
-    var ne = mercatorToLonLat(e, n);
-
-    var centerLon = (sw[0] + ne[0]) / 2;
-    var centerLat = (sw[1] + ne[1]) / 2;
-    var centerH = (minZ + maxZ) / 2;
-
-    // 计算包围盒对角线长度作为相机距离参考
-    var c1 = Cesium.Cartesian3.fromDegrees(sw[0], sw[1], minZ);
-    var c2 = Cesium.Cartesian3.fromDegrees(ne[0], ne[1], maxZ);
-    var diagonal = Cesium.Cartesian3.distance(c1, c2);
-
-    // 构造精确 BoundingSphere
-    var center = Cesium.Cartesian3.fromDegrees(centerLon, centerLat, centerH);
-    var radius = Math.max(diagonal / 2, 5); // 至少 5 米半径
-    var bs = new Cesium.BoundingSphere(center, radius);
-
-    var fov = this._viewer.scene.camera.frustum.fov || Cesium.Math.toRadians(60);
-    var optimalDist = radius / Math.tan(fov / 2) * 1.2;
-    var cameraDistance = Math.max(15, Math.min(2000, Math.max(radius * 2.5, optimalDist)));
-    var offset = new Cesium.HeadingPitchRange(
-      Cesium.Math.toRadians(0),
-      Cesium.Math.toRadians(-40),
-      cameraDistance
-    );
-
-    this._viewer.scene.camera.flyToBoundingSphere(bs, {
-      offset: offset,
-      duration: 1.2,
-    });
-
-    console.log('[SyncCtrl] 精确定位: center=(' + centerLon.toFixed(6) + ',' + centerLat.toFixed(6) + ',' + centerH.toFixed(1) +
-      '), radius=' + radius.toFixed(1) + 'm, key=' + linkKey);
-
-    return true;
-  }
-
   clearAllPick() {
     this.clearPickMarker2D();
     this.clearPickEntity3D();
