@@ -27,7 +27,6 @@
     var PRESETS       = FL.PRESETS;
     var MODEL_SLIDERS = FL.MODEL_SLIDERS;
     var SHADER_SLIDERS = FL.SHADER_SLIDERS;
-    var WIDE_SLIDERS  = FL.WIDE_SLIDERS;
     var isModelLayer  = FL.isModelLayer;
     var parseColor    = FL.parseColor;
     var rgbToHex      = FL.rgbToHex;
@@ -118,108 +117,6 @@
             '}';
     }
 
-    // 宽域泛光：大步长二次扩散 + 深度排除 + 渐近饱和
-    function buildWideBloomShader(threshold, intensity, radius, sigma, colorR, colorG, colorB) {
-        var s2  = ((sigma || 3.0) * (sigma || 3.0) * 2.0).toFixed(6);
-        var thr = threshold.toFixed(6);
-        var hi  = (threshold + 0.08).toFixed(6);
-        var rad = radius.toFixed(6);
-        var mul = intensity.toFixed(6);
-        var glowColor = [
-            Math.max(colorR, 0.001).toFixed(6),
-            Math.max(colorG, 0.001).toFixed(6),
-            Math.max(colorB, 0.001).toFixed(6),
-        ].join(', ');
-        return '' +
-            'uniform sampler2D colorTexture;\n' +
-            'uniform sampler2D depthTexture;\n' +
-            'varying vec2 v_textureCoordinates;\n' +
-            'void main() {\n' +
-            '    vec4 src = texture2D(colorTexture, v_textureCoordinates);\n' +
-            '    vec2 texel = 1.0 / czm_viewport.zw;\n' +
-            '    vec3 bloom = vec3(0.0);\n' +
-            '    float wSum = 0.0;\n' +
-            '    vec3 marker = normalize(vec3(' + glowColor + '));\n' +
-            '    for (int i = -3; i <= 3; i++) {\n' +
-            '        for (int j = -3; j <= 3; j++) {\n' +
-            '            vec2 uv = v_textureCoordinates + vec2(float(i), float(j)) * texel * ' + rad + ';\n' +
-            '            vec4 s = texture2D(colorTexture, uv);\n' +
-            '            float depth = texture2D(depthTexture, uv).r;\n' +
-            '            float notSky = step(0.001, 1.0 - depth);\n' +
-            '            float lum = dot(s.rgb, vec3(0.2126, 0.7152, 0.0722));\n' +
-            '            float colorDistance = distance(normalize(s.rgb + vec3(0.0001)), marker);\n' +
-            '            float modelColor = 1.0 - smoothstep(0.06, 0.13, colorDistance);\n' +
-            '            float warmMarker = smoothstep(0.05, 0.12, s.r - s.b);\n' +
-            '            float mask = smoothstep(' + thr + ', ' + hi + ', lum) * modelColor * warmMarker * notSky;\n' +
-            '            float d2 = float(i * i + j * j);\n' +
-            '            float w = exp(-d2 / ' + s2 + ');\n' +
-            '            bloom += vec3(' + glowColor + ') * mask * w;\n' +
-            '            wSum += w;\n' +
-            '        }\n' +
-            '    }\n' +
-            '    if (wSum > 0.0) bloom /= wSum;\n' +
-            '    vec3 glow = bloom * ' + mul + ';\n' +
-            '    vec3 bf = vec3(1.0) - exp(-glow);\n' +
-            '    vec3 combined = src.rgb + bf * (vec3(1.0) - src.rgb);\n' +
-            '    gl_FragColor = vec4(combined, src.a);\n' +
-            '}';
-    }
-
-    // 模型外轮廓描边：
-    // 先将模型软掩膜二值化，再只保留“中心是模型、邻域包含背景”的内侧边界。
-    // 这样不会把构件表面明暗、纹理和接缝都识别成 Sobel 边缘。
-    // 合成使用受限 screen blend，避免白色描边把半透明重叠区域继续烧白。
-    function buildOutlineShader(
-        strength, edgeR, edgeG, edgeB,
-        threshold, colorR, colorG, colorB
-    ) {
-        var str = strength.toFixed(6);
-        var eR = (edgeR != null ? edgeR : 0.75).toFixed(6);
-        var eG = (edgeG != null ? edgeG : 1.0).toFixed(6);
-        var eB = (edgeB != null ? edgeB : 1.0).toFixed(6);
-        var thr = Math.max(0, threshold - 0.12).toFixed(6);
-        var hi = Math.min(1.0, threshold + 0.04).toFixed(6);
-        var marker = [
-            Math.max(colorR, 0.001).toFixed(6),
-            Math.max(colorG, 0.001).toFixed(6),
-            Math.max(colorB, 0.001).toFixed(6),
-        ].join(', ');
-        return '' +
-            'uniform sampler2D colorTexture;\n' +
-            'uniform sampler2D depthTexture;\n' +
-            'varying vec2 v_textureCoordinates;\n' +
-            'float modelMask(vec2 uv) {\n' +
-            '    vec4 s = texture2D(colorTexture, uv);\n' +
-            '    float depth = texture2D(depthTexture, uv).r;\n' +
-            '    float notSky = step(0.001, 1.0 - depth);\n' +
-            '    float lum = dot(s.rgb, vec3(0.2126, 0.7152, 0.0722));\n' +
-            '    vec3 marker = normalize(vec3(' + marker + '));\n' +
-            '    float colorDistance = distance(normalize(s.rgb + vec3(0.0001)), marker);\n' +
-            '    float modelColor = 1.0 - smoothstep(0.06, 0.13, colorDistance);\n' +
-            '    float warmMarker = smoothstep(0.035, 0.10, s.r - s.b);\n' +
-            '    return smoothstep(' + thr + ', ' + hi + ', lum) * modelColor * warmMarker * notSky;\n' +
-            '}\n' +
-            'void main() {\n' +
-            '    vec4 src = texture2D(colorTexture, v_textureCoordinates);\n' +
-            '    vec2 ts = 1.25 / czm_viewport.zw;\n' +
-            '    float c  = step(0.18, modelMask(v_textureCoordinates));\n' +
-            '    float tl = step(0.18, modelMask(v_textureCoordinates + vec2(-ts.x,  ts.y)));\n' +
-            '    float t  = step(0.18, modelMask(v_textureCoordinates + vec2(  0.0,  ts.y)));\n' +
-            '    float tr = step(0.18, modelMask(v_textureCoordinates + vec2( ts.x,  ts.y)));\n' +
-            '    float l  = step(0.18, modelMask(v_textureCoordinates + vec2(-ts.x,   0.0)));\n' +
-            '    float r  = step(0.18, modelMask(v_textureCoordinates + vec2( ts.x,   0.0)));\n' +
-            '    float bl = step(0.18, modelMask(v_textureCoordinates + vec2(-ts.x, -ts.y)));\n' +
-            '    float b  = step(0.18, modelMask(v_textureCoordinates + vec2(  0.0, -ts.y)));\n' +
-            '    float br = step(0.18, modelMask(v_textureCoordinates + vec2( ts.x, -ts.y)));\n' +
-            '    float neighborMin = min(min(min(t, b), min(l, r)), min(min(tl, tr), min(bl, br)));\n' +
-            '    float edge = c * (1.0 - neighborMin);\n' +
-            '    vec3 edgeCol = vec3(' + eR + ', ' + eG + ', ' + eB + ');\n' +
-            '    vec3 edgeGlow = edgeCol * edge * min(' + str + ', 0.35);\n' +
-            '    vec3 combined = src.rgb + edgeGlow * (vec3(1.0) - src.rgb);\n' +
-            '    gl_FragColor = vec4(combined, src.a);\n' +
-            '}';
-    }
-
     // ==================== Vue3 应用 ====================
 
     var vue = Vue;
@@ -240,7 +137,7 @@
             var sceneReady = ref(false);
             var diagLog = ref('');
 
-            var params = reactive(Object.assign({}, PRESETS.defaults));
+            var params = reactive(Object.assign({}, PRESETS.target));
 
             var activeTooltip = ref('');
             var tooltipStyle = reactive({ left: '0px', top: '0px' });
@@ -251,8 +148,6 @@
             var sceneLayers = [];
             var initialCamera = null;
             var bloomStage = null;
-            var wideBloomStage = null;
-            var outlineStage = null;
             var testStage = null;
             var extractDebugStage = null;
             var rebuildTimer = null;
@@ -274,10 +169,6 @@
             });
 
             var colorInput = ref('');
-
-            var outlineColorPreviewStyle = computed(function () {
-                return { background: params.outlineColor || '#BFFFFF' };
-            });
 
             // ---- 颜色输入解析 ----
             function applyColorInput() {
@@ -306,17 +197,12 @@
                     colorG: +params.colorG.toFixed(4),
                     colorB: +params.colorB.toFixed(4),
                     alpha: +params.alpha.toFixed(2),
-                    ambientBoost: +params.ambientBoost.toFixed(2),
+                    modelBrightness: +params.modelBrightness.toFixed(2),
+                    sceneAmbient: +params.sceneAmbient.toFixed(2),
                     threshold: +params.threshold.toFixed(2),
                     intensity: +params.intensity.toFixed(2),
                     radius: +params.radius.toFixed(2),
                     sigma: +params.sigma.toFixed(2),
-                    wideEnabled: params.wideEnabled,
-                    wideIntensity: +params.wideIntensity.toFixed(2),
-                    wideRadius: +params.wideRadius.toFixed(2),
-                    outlineEnabled: params.outlineEnabled,
-                    outlineStrength: +params.outlineStrength.toFixed(2),
-                    outlineColor: params.outlineColor,
                 };
                 var text = JSON.stringify(obj, null, 4);
                 if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -518,6 +404,7 @@
                 }
 
                 applyBrightness();
+                applySceneAmbient();
 
                 var ldrWarn = (params.colorR > 1 || params.colorG > 1 || params.colorB > 1)
                     ? ' ⚠️ RGB>1.0 被LDR截断' : '';
@@ -530,7 +417,7 @@
             }
 
             function applyBrightness() {
-                var b = params.ambientBoost;
+                var b = params.modelBrightness;
                 var applied = [];
 
                 for (var i = 0; i < sceneLayers.length; i++) {
@@ -546,6 +433,18 @@
 
                 log('亮度控制: ' + b.toFixed(2) +
                     ' (' + (applied.length ? applied.join('+') : '无可用 API') + ')');
+            }
+
+            function applySceneAmbient() {
+                if (!scene.lightSource || !savedAmbient) return;
+                var factor = params.sceneAmbient;
+                scene.lightSource.ambientLightColor = new Cesium.Color(
+                    savedAmbient.red * factor,
+                    savedAmbient.green * factor,
+                    savedAmbient.blue * factor,
+                    savedAmbient.alpha
+                );
+                log('场景环境光: ' + factor.toFixed(2) + '× 原始值');
             }
 
             function restoreModelColor() {
@@ -610,41 +509,12 @@
                 );
                 bloomStage = addStage('bloom', src);
 
-                if (params.wideEnabled) createWideStage();
-                if (params.outlineEnabled) createOutlineStage();
-
                 diagStages();
             }
 
-            function createWideStage() {
-                removeStage(wideBloomStage);
-                wideBloomStage = null;
-                var src = buildWideBloomShader(
-                    params.threshold * 0.85,
-                    params.wideIntensity,
-                    params.wideRadius,
-                    params.sigma * 1.5,
-                    params.colorR, params.colorG, params.colorB
-                );
-                wideBloomStage = addStage('wide', src);
-            }
-
-            function createOutlineStage() {
-                removeStage(outlineStage);
-                outlineStage = null;
-                var oc = parseColor(params.outlineColor) || { r: 0.75, g: 1.0, b: 1.0 };
-                outlineStage = addStage('outline',
-                    buildOutlineShader(
-                        params.outlineStrength, oc.r, oc.g, oc.b,
-                        params.threshold,
-                        params.colorR, params.colorG, params.colorB
-                    ));
-            }
-
             function removeShaderStages() {
-                removeStage(bloomStage);     bloomStage = null;
-                removeStage(wideBloomStage); wideBloomStage = null;
-                removeStage(outlineStage);   outlineStage = null;
+                removeStage(bloomStage);
+                bloomStage = null;
             }
 
             function scheduleRebuild() {
@@ -699,7 +569,7 @@
                 var thr = params.threshold;
                 log('提取调试开启: threshold=' + thr);
                 log('预期: 桥梁=白色, 背景=黑色');
-                log('如果全黑 → 模型亮度不足, 请增大"环境光"或降低"亮度阈值"');
+                log('如果全黑 → 模型亮度不足, 请增大"模型亮度"或降低"亮度阈值"');
                 log('如果全白 → 阈值过低, 请升高"亮度阈值"');
 
                 var src = buildExtractDebugShader(
@@ -764,12 +634,13 @@
             watch(
                 function () {
                     return [params.colorR, params.colorG, params.colorB,
-                            params.alpha, params.ambientBoost];
+                            params.alpha, params.modelBrightness,
+                            params.sceneAmbient];
                 },
                 function () {
                     if (!bloomEnabled.value) return;
                     applyModelColor();
-                    // 泛光和描边的模型软掩膜都依赖当前模型颜色。
+                    // 泛光软掩膜依赖当前模型颜色。
                     scheduleRebuild();
                 }
             );
@@ -777,29 +648,10 @@
             watch(
                 function () {
                     return [params.threshold, params.intensity, params.radius,
-                            params.sigma, params.wideIntensity, params.wideRadius,
-                            params.outlineStrength, params.outlineColor];
+                            params.sigma];
                 },
                 function () {
                     if (bloomEnabled.value) scheduleRebuild();
-                }
-            );
-
-            watch(
-                function () { return params.wideEnabled; },
-                function (on) {
-                    if (!bloomEnabled.value) return;
-                    if (on) { createWideStage(); }
-                    else { removeStage(wideBloomStage); wideBloomStage = null; }
-                }
-            );
-
-            watch(
-                function () { return params.outlineEnabled; },
-                function (on) {
-                    if (!bloomEnabled.value) return;
-                    if (on) { createOutlineStage(); }
-                    else { removeStage(outlineStage); outlineStage = null; }
                 }
             );
 
@@ -818,13 +670,11 @@
                 params: params,
                 colorPreviewStyle: colorPreviewStyle,
                 colorInput: colorInput,
-                outlineColorPreviewStyle: outlineColorPreviewStyle,
                 activeTooltip: activeTooltip,
                 tooltipStyle: tooltipStyle,
 
                 MODEL_SLIDERS: MODEL_SLIDERS,
                 SHADER_SLIDERS: SHADER_SLIDERS,
-                WIDE_SLIDERS: WIDE_SLIDERS,
 
                 toggleBloom: toggleBloom,
                 applyPreset: applyPreset,
