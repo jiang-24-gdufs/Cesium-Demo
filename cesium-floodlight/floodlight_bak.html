@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge,chrome=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
+    <title>宜常高铁 - 模型泛光效果</title>
+    <link href="../../Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+    <link href="style.css" rel="stylesheet">
+    <script src="../../Build/Cesium/Cesium.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+</head>
+<body>
+
+<div id="app">
+    <div id="cesiumContainer"></div>
+
+    <!-- ===== 工具栏 ===== -->
+    <div id="toolbar">
+        <button :class="['btn-toggle', bloomEnabled ? 'is-on' : 'is-off']"
+                @click="toggleBloom">
+            <span class="toggle-dot"></span>
+            {{ bloomEnabled ? '泛光 ON' : '泛光 OFF' }}
+        </button>
+        <button @click="resetView">复位视角</button>
+        <button class="btn-small" @click="runTestShader"
+                title="叠加红色色调测试着色器，验证 PostProcessStage 管线是否可用">
+            测试着色器
+        </button>
+        <button class="btn-small" @click="runExtractDebug"
+                title="亮度提取可视化：白色=被阈值捕获 黑色=未捕获，期望桥梁白色、背景黑色">
+            提取调试
+        </button>
+        <button class="btn-small" @click="diagStages"
+                title="将 PostProcessStages 当前状态输出到诊断日志">
+            诊断
+        </button>
+    </div>
+
+    <!-- ===== 泛光控制面板 ===== -->
+    <div id="bloomPanel" v-show="bloomEnabled">
+        <h4>泛光效果参数</h4>
+
+        <!-- 模型外观 -->
+        <div class="ctrl-section">
+            <div class="ctrl-title">模型外观</div>
+            <div class="color-input-row">
+                <div class="color-preview color-preview-lg" :style="colorPreviewStyle"></div>
+                <input type="text" class="color-hex-input"
+                       v-model="colorInput"
+                       @change="applyColorInput"
+                       placeholder="#RRGGBB 或 R, G, B">
+                <span class="ctrl-tip"
+                      @mouseenter="showTip($event, '支持 HEX 或 RGB 输入:\n#CBCEC7\n203, 206, 199\nrgb(203, 206, 199)\n回车或失焦后自动解析到 R/G/B 滑块')"
+                      @mouseleave="hideTip()">?</span>
+            </div>
+            <div class="ctrl-row" v-for="s in MODEL_SLIDERS" :key="s.key">
+                <span class="ctrl-label">
+                    {{ s.label }}
+                    <span class="ctrl-tip"
+                          @mouseenter="showTip($event, s.tip)"
+                          @mouseleave="hideTip()">?</span>
+                </span>
+                <input type="range"
+                       :value="params[s.key]"
+                       @input="params[s.key] = parseFloat($event.target.value)"
+                       :min="s.min" :max="s.max" :step="s.step">
+                <input type="number" class="ctrl-val ctrl-number"
+                       v-model.number="params[s.key]"
+                       @change="clampNumberParam(s.key, s.min, s.max)"
+                       :min="s.min" :max="s.max" :step="s.step"
+                       :aria-label="s.label + '数值'">
+            </div>
+        </div>
+
+        <!-- 泛光着色器参数 -->
+        <div class="ctrl-section">
+            <div class="ctrl-title">泛光着色器参数</div>
+            <div class="ctrl-row" v-for="s in SHADER_SLIDERS" :key="s.key">
+                <span class="ctrl-label">
+                    {{ s.label }}
+                    <span class="ctrl-tip"
+                          @mouseenter="showTip($event, s.tip)"
+                          @mouseleave="hideTip()">?</span>
+                </span>
+                <input type="range"
+                       :value="params[s.key]"
+                       @input="params[s.key] = parseFloat($event.target.value)"
+                       :min="s.min" :max="s.max" :step="s.step">
+                <input type="number" class="ctrl-val ctrl-number"
+                       v-model.number="params[s.key]"
+                       @change="clampNumberParam(s.key, s.min, s.max)"
+                       :min="s.min" :max="s.max" :step="s.step"
+                       :aria-label="s.label + '数值'">
+            </div>
+        </div>
+
+        <!-- 宽域扩散 -->
+        <div class="ctrl-section">
+            <div class="ctrl-row">
+                <label>
+                    <input type="checkbox" v-model="params.wideEnabled">
+                    宽域扩散（二次泛光）
+                    <span class="ctrl-tip"
+                          @mouseenter="showTip($event, '在主泛光基础上添加更大范围的二次扩散\n产生远距离柔和光晕\n默认关闭，开启后可调参数')"
+                          @mouseleave="hideTip()">?</span>
+                </label>
+            </div>
+            <template v-if="params.wideEnabled">
+                <div class="ctrl-row" v-for="s in WIDE_SLIDERS" :key="s.key">
+                    <span class="ctrl-label">
+                        {{ s.label }}
+                        <span class="ctrl-tip"
+                              @mouseenter="showTip($event, s.tip)"
+                              @mouseleave="hideTip()">?</span>
+                    </span>
+                    <input type="range"
+                           :value="params[s.key]"
+                           @input="params[s.key] = parseFloat($event.target.value)"
+                           :min="s.min" :max="s.max" :step="s.step">
+                    <input type="number" class="ctrl-val ctrl-number"
+                           v-model.number="params[s.key]"
+                           @change="clampNumberParam(s.key, s.min, s.max)"
+                           :min="s.min" :max="s.max" :step="s.step"
+                           :aria-label="s.label + '数值'">
+                </div>
+            </template>
+        </div>
+
+        <!-- 轮廓描边 -->
+        <div class="ctrl-section">
+            <div class="ctrl-row">
+                <label>
+                    <input type="checkbox" v-model="params.outlineEnabled">
+                    轮廓描边
+                    <span class="ctrl-tip"
+                          @mouseenter="showTip($event, 'Sobel 边缘检测\n在模型轮廓处叠加亮色描线\n可与泛光叠加使用')"
+                          @mouseleave="hideTip()">?</span>
+                </label>
+            </div>
+            <div class="ctrl-row" v-if="params.outlineEnabled">
+                <span class="ctrl-label">
+                    描边强度
+                    <span class="ctrl-tip"
+                          @mouseenter="showTip($event, '边缘检测结果的叠加倍率\n值越大描线越明显')"
+                          @mouseleave="hideTip()">?</span>
+                </span>
+                <input type="range"
+                       :value="params.outlineStrength"
+                       @input="params.outlineStrength = parseFloat($event.target.value)"
+                       min="0" max="2" step="0.01">
+                <input type="number" class="ctrl-val ctrl-number"
+                       v-model.number="params.outlineStrength"
+                       @change="clampNumberParam('outlineStrength', 0, 2)"
+                       min="0" max="2" step="0.01"
+                       aria-label="描边强度数值">
+            </div>
+            <div class="ctrl-row" v-if="params.outlineEnabled">
+                <span class="ctrl-label">描边颜色</span>
+                <input type="text" class="color-hex-input color-hex-sm"
+                       v-model="params.outlineColor"
+                       placeholder="#RRGGBB">
+                <div class="color-preview" :style="outlineColorPreviewStyle"></div>
+            </div>
+        </div>
+
+        <!-- 操作按钮 -->
+        <div class="ctrl-actions">
+            <button class="btn-secondary" @click="applyPreset('target')">目标预设</button>
+            <button class="btn-secondary" @click="applyPreset('defaults')">重置默认</button>
+        </div>
+        <div class="ctrl-actions">
+            <button class="btn-copy" @click="copyConfig"
+                    title="复制当前所有参数为 JSON 对象到剪贴板">复制配置</button>
+        </div>
+
+        <!-- 诊断日志 -->
+        <div class="diag-info" v-if="diagLog">{{ diagLog }}</div>
+    </div>
+
+    <!-- ===== Tooltip 浮层 (fixed 定位，不受 panel overflow 裁剪) ===== -->
+    <div v-if="activeTooltip"
+         class="tooltip-popup"
+         :style="tooltipStyle">{{ activeTooltip }}</div>
+
+    <!-- ===== 状态栏 ===== -->
+    <div id="statusBar">
+        <span>{{ status }}</span>
+        <span class="camera-info">{{ cameraInfo }}</span>
+    </div>
+</div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
