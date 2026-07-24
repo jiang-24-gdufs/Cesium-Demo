@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge,chrome=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
+    <title>宜常高铁 - 模型泛光效果</title>
+    <link href="../../Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+    <script type="text/javascript" src="../../Build/Cesium/Cesium.js"></script>
+    <style>
+        html, body, #cesiumContainer {
+            width: 100%; height: 100%; margin: 0; padding: 0;
+            overflow: hidden; background: #000;
+        }
+
+        #toolbar {
+            position: absolute; top: 10px; left: 10px; z-index: 1000;
+            background: rgba(20, 24, 32, 0.92);
+            padding: 10px 16px; border-radius: 6px;
+            color: #fff; font-size: 13px;
+            border: 1px solid rgba(100, 200, 255, 0.25);
+            box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+        }
+        #toolbar .title {
+            font-size: 15px; font-weight: 600;
+            background: linear-gradient(90deg, #64d8ff, #a0e8ff);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+        }
+        #toolbar button {
+            padding: 6px 14px; margin: 3px;
+            cursor: pointer; background: #2ea8c5;
+            color: #fff; border: none; border-radius: 4px; font-size: 13px;
+            transition: background 0.2s;
+        }
+        #toolbar button:hover { background: #2393ad; }
+        #toolbar button.active { background: #e07d22; }
+
+        /* ===== 控制面板 ===== */
+        #bloomPanel {
+            position: absolute; top: 10px; right: 10px; z-index: 1000;
+            background: rgba(20, 24, 32, 0.94);
+            padding: 14px 16px; border-radius: 6px;
+            color: #ddd; font-size: 12px;
+            border: 1px solid rgba(100, 200, 255, 0.2);
+            box-shadow: 0 2px 16px rgba(0,0,0,0.5);
+            width: 280px; max-height: 85vh; overflow-y: auto;
+            user-select: none;
+        }
+        #bloomPanel h4 {
+            margin: 0 0 10px; padding-bottom: 8px;
+            border-bottom: 1px solid rgba(100,200,255,0.2);
+            font-size: 14px; font-weight: 600;
+            background: linear-gradient(90deg, #64d8ff, #a0e8ff);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .ctrl-section {
+            margin-bottom: 10px; padding: 8px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .ctrl-title {
+            font-size: 11px; color: #8ab4c8;
+            text-transform: uppercase; letter-spacing: 1px;
+            margin-bottom: 6px; font-weight: 600;
+        }
+        .ctrl-row {
+            display: flex; align-items: center;
+            margin: 4px 0; gap: 6px;
+        }
+        .ctrl-row label {
+            display: flex; align-items: center; gap: 5px;
+            cursor: pointer; font-size: 12px;
+        }
+        .ctrl-label {
+            width: 68px; flex-shrink: 0;
+            font-size: 11px; color: #aac;
+        }
+        .ctrl-row input[type="range"] {
+            flex: 1; height: 4px;
+            -webkit-appearance: none; appearance: none;
+            background: rgba(100,200,255,0.15); border-radius: 2px;
+            outline: none;
+        }
+        .ctrl-row input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; appearance: none;
+            width: 14px; height: 14px; border-radius: 50%;
+            background: #64d8ff; cursor: pointer;
+            box-shadow: 0 0 4px rgba(100,216,255,0.5);
+        }
+        .ctrl-val {
+            width: 36px; text-align: right;
+            font-family: 'Consolas', monospace;
+            font-size: 11px; color: #7cb8d0;
+        }
+        .ctrl-row input[type="checkbox"] {
+            accent-color: #2ea8c5;
+        }
+        .ctrl-actions {
+            display: flex; gap: 6px; margin-top: 10px;
+        }
+        .ctrl-actions button {
+            flex: 1; padding: 6px 10px;
+            cursor: pointer; border: none; border-radius: 4px;
+            font-size: 12px; color: #fff; transition: background 0.2s;
+        }
+        #btnPreset { background: #2ea8c5; }
+        #btnPreset:hover { background: #2393ad; }
+        #btnResetParams { background: #555; }
+        #btnResetParams:hover { background: #666; }
+
+        .color-preview {
+            width: 20px; height: 20px; border-radius: 3px;
+            border: 1px solid rgba(255,255,255,0.2);
+            flex-shrink: 0;
+        }
+
+        /* ===== 状态栏 ===== */
+        #statusBar {
+            position: absolute; bottom: 0; left: 0; right: 0; z-index: 999;
+            background: rgba(0,0,0,0.75); color: #ccc;
+            padding: 4px 12px; font-size: 12px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        #cameraInfo {
+            text-align: right; color: #8ab4c8;
+            font-family: 'Consolas', monospace; font-size: 11px;
+        }
+
+        #bloomPanel::-webkit-scrollbar { width: 5px; }
+        #bloomPanel::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+    </style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+
+<div id="toolbar">
+    <div class="title">宜常高铁 · 模型泛光效果</div>
+    <button id="btnToggleBloom" class="active">泛光: 开</button>
+    <button id="btnReset">复位视角</button>
+</div>
+
+<div id="bloomPanel">
+    <h4>泛光效果参数</h4>
+
+    <!-- 模型外观 -->
+    <div class="ctrl-section">
+        <div class="ctrl-title">模型外观</div>
+        <div class="ctrl-row">
+            <span class="ctrl-label">颜色 R</span>
+            <input type="range" id="sldR" min="0" max="1" step="0.01" value="1.0">
+            <span class="ctrl-val" id="valR">1.00</span>
+            <div class="color-preview" id="colorPreview"></div>
+        </div>
+        <div class="ctrl-row">
+            <span class="ctrl-label">颜色 G</span>
+            <input type="range" id="sldG" min="0" max="1" step="0.01" value="1.0">
+            <span class="ctrl-val" id="valG">1.00</span>
+        </div>
+        <div class="ctrl-row">
+            <span class="ctrl-label">颜色 B</span>
+            <input type="range" id="sldB" min="0" max="1" step="0.01" value="1.0">
+            <span class="ctrl-val" id="valB">1.00</span>
+        </div>
+        <div class="ctrl-row">
+            <span class="ctrl-label">透明度</span>
+            <input type="range" id="sldAlpha" min="0.05" max="1.0" step="0.01" value="0.55">
+            <span class="ctrl-val" id="valAlpha">0.55</span>
+        </div>
+    </div>
+
+    <!-- 泛光参数 -->
+    <div class="ctrl-section">
+        <div class="ctrl-title">泛光着色器参数</div>
+        <div class="ctrl-row">
+            <span class="ctrl-label">亮度阈值</span>
+            <input type="range" id="sldThreshold" min="0.0" max="1.0" step="0.01" value="0.35">
+            <span class="ctrl-val" id="valThreshold">0.35</span>
+        </div>
+        <div class="ctrl-row">
+            <span class="ctrl-label">泛光强度</span>
+            <input type="range" id="sldIntensity" min="0.0" max="6.0" step="0.1" value="2.5">
+            <span class="ctrl-val" id="valIntensity">2.50</span>
+        </div>
+        <div class="ctrl-row">
+            <span class="ctrl-label">模糊半径</span>
+            <input type="range" id="sldRadius" min="0.5" max="8.0" step="0.1" value="3.5">
+            <span class="ctrl-val" id="valRadius">3.50</span>
+        </div>
+        <div class="ctrl-row">
+            <span class="ctrl-label">高斯衰减</span>
+            <input type="range" id="sldSigma" min="0.5" max="8.0" step="0.1" value="3.0">
+            <span class="ctrl-val" id="valSigma">3.00</span>
+        </div>
+    </div>
+
+    <!-- 宽泛光（二次扩散） -->
+    <div class="ctrl-section">
+        <div class="ctrl-row">
+            <label><input type="checkbox" id="chkWideBloom" checked> 宽域扩散（二次泛光）</label>
+        </div>
+        <div class="ctrl-row">
+            <span class="ctrl-label">扩散强度</span>
+            <input type="range" id="sldWideIntensity" min="0.0" max="3.0" step="0.1" value="0.8">
+            <span class="ctrl-val" id="valWideIntensity">0.80</span>
+        </div>
+        <div class="ctrl-row">
+            <span class="ctrl-label">扩散半径</span>
+            <input type="range" id="sldWideRadius" min="1.0" max="12.0" step="0.1" value="6.0">
+            <span class="ctrl-val" id="valWideRadius">6.00</span>
+        </div>
+    </div>
+
+    <!-- 轮廓描边 -->
+    <div class="ctrl-section">
+        <div class="ctrl-row">
+            <label><input type="checkbox" id="chkOutline"> 轮廓描边</label>
+        </div>
+        <div class="ctrl-row">
+            <span class="ctrl-label">描边强度</span>
+            <input type="range" id="sldOutline" min="0.0" max="2.0" step="0.05" value="0.6">
+            <span class="ctrl-val" id="valOutline">0.60</span>
+        </div>
+    </div>
+
+    <!-- 操作按钮 -->
+    <div class="ctrl-actions">
+        <button id="btnPreset">匹配目标效果</button>
+        <button id="btnResetParams">重置默认</button>
+    </div>
+</div>
+
+<div id="statusBar">
+    <span id="statusText">正在初始化...</span>
+    <span id="cameraInfo"></span>
+</div>
+
+<script type="text/javascript">
+(function () {
+    'use strict';
+
+    // ===================== 配置 =====================
+    var SCENE_URL = 'https://ct.sunrtcloud.com/iserver/services/3D-ycgt_20260414/rest/realspace';
+    var TERRAIN_URL = 'https://ct.sunrtcloud.com/iserver/services/3D-local3DCache-terrain_20260415/rest/realspace/datas/dixin';
+    var TIANDITU_TOKEN = 'd044a50924a839d21691035e52fe43a5';
+
+    // 匹配目标截图的预设参数
+    var TARGET_PRESET = {
+        r: 1.0, g: 1.0, b: 1.0, alpha: 0.55,
+        threshold: 0.35, intensity: 2.5, radius: 3.5, sigma: 3.0,
+        wideEnabled: true, wideIntensity: 0.8, wideRadius: 6.0,
+        outlineEnabled: false, outlineStrength: 0.6
+    };
+
+    var DEFAULT_PRESET = {
+        r: 1.0, g: 1.0, b: 1.0, alpha: 0.55,
+        threshold: 0.35, intensity: 2.5, radius: 3.5, sigma: 3.0,
+        wideEnabled: true, wideIntensity: 0.8, wideRadius: 6.0,
+        outlineEnabled: false, outlineStrength: 0.6
+    };
+
+    // ===================== 着色器源码 =====================
+
+    // 主泛光着色器：亮部提取 + 高斯模糊 + 叠加
+    // 采用 9×9 核心（81 采样），通过 u_radius 控制扩散范围
+    var BLOOM_SHADER = [
+        'uniform sampler2D colorTexture;',
+        'uniform float u_threshold;',
+        'uniform float u_intensity;',
+        'uniform float u_radius;',
+        'uniform float u_sigma;',
+        'varying vec2 v_textureCoordinates;',
+        '',
+        'void main() {',
+        '    vec4 src = texture2D(colorTexture, v_textureCoordinates);',
+        '    vec2 texel = 1.0 / czm_viewport.zw;',
+        '    vec3 bloom = vec3(0.0);',
+        '    float wSum = 0.0;',
+        '    float s2 = u_sigma * u_sigma * 2.0;',
+        '',
+        '    for (int i = -4; i <= 4; i++) {',
+        '        for (int j = -4; j <= 4; j++) {',
+        '            vec2 off = vec2(float(i), float(j)) * texel * u_radius;',
+        '            vec4 s = texture2D(colorTexture, v_textureCoordinates + off);',
+        '            float lum = dot(s.rgb, vec3(0.2126, 0.7152, 0.0722));',
+        '            float bright = smoothstep(u_threshold, u_threshold + 0.15, lum);',
+        '            float d2 = float(i * i + j * j);',
+        '            float w = exp(-d2 / s2);',
+        '            bloom += s.rgb * bright * w;',
+        '            wSum += bright * w;',
+        '        }',
+        '    }',
+        '',
+        '    if (wSum > 0.0) bloom /= wSum;',
+        '    gl_FragColor = vec4(src.rgb + bloom * u_intensity, src.a);',
+        '}'
+    ].join('\n');
+
+    // 宽域泛光着色器：对已含泛光的画面做二次大范围扩散
+    // 7×7 核心（49 采样），大步长采样实现远距离光晕
+    var WIDE_BLOOM_SHADER = [
+        'uniform sampler2D colorTexture;',
+        'uniform float u_threshold;',
+        'uniform float u_intensity;',
+        'uniform float u_radius;',
+        'varying vec2 v_textureCoordinates;',
+        '',
+        'void main() {',
+        '    vec4 src = texture2D(colorTexture, v_textureCoordinates);',
+        '    vec2 texel = 1.0 / czm_viewport.zw;',
+        '    vec3 bloom = vec3(0.0);',
+        '    float wSum = 0.0;',
+        '',
+        '    for (int i = -3; i <= 3; i++) {',
+        '        for (int j = -3; j <= 3; j++) {',
+        '            vec2 off = vec2(float(i), float(j)) * texel * u_radius;',
+        '            vec4 s = texture2D(colorTexture, v_textureCoordinates + off);',
+        '            float lum = dot(s.rgb, vec3(0.2126, 0.7152, 0.0722));',
+        '            float bright = smoothstep(u_threshold, u_threshold + 0.2, lum);',
+        '            float d2 = float(i * i + j * j);',
+        '            float w = exp(-d2 / 12.0);',
+        '            bloom += s.rgb * bright * w;',
+        '            wSum += bright * w;',
+        '        }',
+        '    }',
+        '',
+        '    if (wSum > 0.0) bloom /= wSum;',
+        '    gl_FragColor = vec4(src.rgb + bloom * u_intensity, src.a);',
+        '}'
+    ].join('\n');
+
+    // 轮廓描边着色器：Sobel 边缘检测
+    var OUTLINE_SHADER = [
+        'uniform sampler2D colorTexture;',
+        'uniform float u_strength;',
+        'varying vec2 v_textureCoordinates;',
+        '',
+        'float lum(vec2 uv) {',
+        '    vec4 s = texture2D(colorTexture, uv);',
+        '    return dot(s.rgb, vec3(0.2126, 0.7152, 0.0722));',
+        '}',
+        '',
+        'void main() {',
+        '    vec4 src = texture2D(colorTexture, v_textureCoordinates);',
+        '    vec2 ts = 1.5 / czm_viewport.zw;',
+        '',
+        '    float tl = lum(v_textureCoordinates + vec2(-ts.x,  ts.y));',
+        '    float t  = lum(v_textureCoordinates + vec2(  0.0,  ts.y));',
+        '    float tr = lum(v_textureCoordinates + vec2( ts.x,  ts.y));',
+        '    float l  = lum(v_textureCoordinates + vec2(-ts.x,   0.0));',
+        '    float r  = lum(v_textureCoordinates + vec2( ts.x,   0.0));',
+        '    float bl = lum(v_textureCoordinates + vec2(-ts.x, -ts.y));',
+        '    float b  = lum(v_textureCoordinates + vec2(  0.0, -ts.y));',
+        '    float br = lum(v_textureCoordinates + vec2( ts.x, -ts.y));',
+        '',
+        '    float gx = (tr + 2.0 * r + br) - (tl + 2.0 * l + bl);',
+        '    float gy = (bl + 2.0 * b + br) - (tl + 2.0 * t + tr);',
+        '    float edge = clamp(sqrt(gx * gx + gy * gy), 0.0, 1.0);',
+        '',
+        '    vec3 edgeCol = vec3(0.75, 1.0, 1.0);',
+        '    gl_FragColor = vec4(src.rgb + edgeCol * edge * u_strength, src.a);',
+        '}'
+    ].join('\n');
+
+    // ===================== 状态变量 =====================
+    var bloomEnabled = true;
+    var bloomStage = null;
+    var wideBloomStage = null;
+    var outlineStage = null;
+    var sceneLayers = [];
+    var initialCamera = null;
+
+    // ===================== DOM 引用 =====================
+    var statusText = document.getElementById('statusText');
+    var cameraInfoEl = document.getElementById('cameraInfo');
+
+    // 控件引用（slider + value display）
+    var controls = {
+        sldR: 'valR', sldG: 'valG', sldB: 'valB', sldAlpha: 'valAlpha',
+        sldThreshold: 'valThreshold', sldIntensity: 'valIntensity',
+        sldRadius: 'valRadius', sldSigma: 'valSigma',
+        sldWideIntensity: 'valWideIntensity', sldWideRadius: 'valWideRadius',
+        sldOutline: 'valOutline'
+    };
+
+    // ===================== Viewer 初始化 =====================
+    Cesium.Ellipsoid.WGS84 = Object.freeze(
+        new Cesium.Ellipsoid(6378137.0, 6378137.0, 6356752.3142451793)
+    );
+
+    if (Cesium.MemoryManager) {
+        try {
+            Cesium.MemoryManager.showMemoryInfo(true);
+            Cesium.MemoryManager.setMaxMemory(16384);
+        } catch (e) { /* 旧版兼容 */ }
+    }
+
+    var viewer = new Cesium.Viewer('cesiumContainer', {
+        infoBox: false,
+        selectionIndicator: false,
+        shouldAnimate: true,
+        navigation: false,
+        shadows: true,
+        showRenderLoopErrors: false
+    });
+
+    viewer.imageryLayers.addImageryProvider(
+        new Cesium.TiandituImageryProvider({
+            mapStyle: Cesium.TiandituMapsStyle.IMG_C,
+            token: TIANDITU_TOKEN,
+            maximumLevel: 17
+        })
+    );
+
+    viewer.clock.currentTime = Cesium.JulianDate.fromDate(new Date('2024-12-09T06:19:00Z'));
+
+    var scene = viewer.scene;
+
+    // 相机位置实时显示
+    scene.postRender.addEventListener(function () {
+        var cp = scene.camera.positionCartographic;
+        cameraInfoEl.textContent =
+            '经度:' + Cesium.Math.toDegrees(cp.longitude).toFixed(6) +
+            ' 纬度:' + Cesium.Math.toDegrees(cp.latitude).toFixed(6) +
+            ' 高度:' + cp.height.toFixed(1) + 'm';
+    });
+
+    // ===================== 加载场景 =====================
+    statusText.textContent = '正在加载场景...';
+
+    try {
+        var openPromise = scene.open(SCENE_URL);
+        Cesium.when(openPromise, function (layers) {
+            sceneLayers = layers;
+            statusText.textContent = '场景加载完成，共 ' + layers.length + ' 个图层 — 泛光已自动启用';
+
+            initialCamera = {
+                destination: scene.camera.position.clone(),
+                orientation: {
+                    heading: scene.camera.heading,
+                    pitch: scene.camera.pitch,
+                    roll: scene.camera.roll
+                }
+            };
+
+            enableBloom();
+        }, function (err) {
+            statusText.textContent = '场景加载失败: ' + (err.message || err);
+            console.error('场景加载失败:', err);
+        });
+    } catch (e) {
+        statusText.textContent = '场景打开异常: ' + (e.message || e);
+        console.error(e);
+    }
+
+    // ===================== 泛光核心逻辑 =====================
+
+    function getSliderVal(id) {
+        return parseFloat(document.getElementById(id).value);
+    }
+
+    function enableBloom() {
+        bloomEnabled = true;
+        updateModelAppearance();
+        createBloomStages();
+        updateWideBloomVisibility();
+        updateOutlineVisibility();
+        syncToggleButton();
+    }
+
+    function disableBloom() {
+        bloomEnabled = false;
+        restoreModelAppearance();
+        removeBloomStages();
+        syncToggleButton();
+    }
+
+    function updateModelAppearance() {
+        var r = getSliderVal('sldR');
+        var g = getSliderVal('sldG');
+        var b = getSliderVal('sldB');
+        var a = getSliderVal('sldAlpha');
+        var color = new Cesium.Color(r, g, b, a);
+
+        for (var i = 0; i < sceneLayers.length; i++) {
+            sceneLayers[i].orderIndependentTranslucency = true;
+            sceneLayers[i].style3D.fillForeColor = color;
+        }
+
+        // 颜色预览块
+        var preview = document.getElementById('colorPreview');
+        if (preview) {
+            preview.style.background = 'rgba(' +
+                Math.round(r * 255) + ',' +
+                Math.round(g * 255) + ',' +
+                Math.round(b * 255) + ',' + a + ')';
+        }
+    }
+
+    function restoreModelAppearance() {
+        for (var i = 0; i < sceneLayers.length; i++) {
+            sceneLayers[i].style3D.fillForeColor = new Cesium.Color(1, 1, 1, 1);
+            sceneLayers[i].orderIndependentTranslucency = false;
+        }
+    }
+
+    function createBloomStages() {
+        if (bloomStage) return;
+
+        try {
+            bloomStage = scene.postProcessStages.add(
+                new Cesium.PostProcessStage({
+                    name: 'floodlight_bloom',
+                    fragmentShader: BLOOM_SHADER,
+                    uniforms: {
+                        u_threshold: function () { return getSliderVal('sldThreshold'); },
+                        u_intensity: function () { return getSliderVal('sldIntensity'); },
+                        u_radius:    function () { return getSliderVal('sldRadius'); },
+                        u_sigma:     function () { return getSliderVal('sldSigma'); }
+                    }
+                })
+            );
+            bloomStage.enabled = true;
+        } catch (e) {
+            console.error('主泛光着色器创建失败:', e);
+            statusText.textContent = '泛光着色器初始化失败';
+        }
+    }
+
+    function createWideBloomStage() {
+        if (wideBloomStage) return;
+        try {
+            wideBloomStage = scene.postProcessStages.add(
+                new Cesium.PostProcessStage({
+                    name: 'floodlight_wide_bloom',
+                    fragmentShader: WIDE_BLOOM_SHADER,
+                    uniforms: {
+                        u_threshold: function () { return getSliderVal('sldThreshold') * 0.85; },
+                        u_intensity: function () { return getSliderVal('sldWideIntensity'); },
+                        u_radius:    function () { return getSliderVal('sldWideRadius'); }
+                    }
+                })
+            );
+            wideBloomStage.enabled = true;
+        } catch (e) {
+            console.error('宽域泛光着色器创建失败:', e);
+        }
+    }
+
+    function createOutlineStage() {
+        if (outlineStage) return;
+        try {
+            outlineStage = scene.postProcessStages.add(
+                new Cesium.PostProcessStage({
+                    name: 'floodlight_outline',
+                    fragmentShader: OUTLINE_SHADER,
+                    uniforms: {
+                        u_strength: function () { return getSliderVal('sldOutline'); }
+                    }
+                })
+            );
+            outlineStage.enabled = true;
+        } catch (e) {
+            console.error('轮廓着色器创建失败:', e);
+        }
+    }
+
+    function removeBloomStages() {
+        if (bloomStage) {
+            scene.postProcessStages.remove(bloomStage);
+            bloomStage = null;
+        }
+        if (wideBloomStage) {
+            scene.postProcessStages.remove(wideBloomStage);
+            wideBloomStage = null;
+        }
+        if (outlineStage) {
+            scene.postProcessStages.remove(outlineStage);
+            outlineStage = null;
+        }
+    }
+
+    function updateWideBloomVisibility() {
+        var enabled = document.getElementById('chkWideBloom').checked && bloomEnabled;
+        if (enabled) {
+            if (!wideBloomStage) createWideBloomStage();
+            else wideBloomStage.enabled = true;
+        } else if (wideBloomStage) {
+            wideBloomStage.enabled = false;
+        }
+    }
+
+    function updateOutlineVisibility() {
+        var enabled = document.getElementById('chkOutline').checked && bloomEnabled;
+        if (enabled) {
+            if (!outlineStage) createOutlineStage();
+            else outlineStage.enabled = true;
+        } else if (outlineStage) {
+            outlineStage.enabled = false;
+        }
+    }
+
+    function syncToggleButton() {
+        var btn = document.getElementById('btnToggleBloom');
+        btn.textContent = bloomEnabled ? '泛光: 开' : '泛光: 关';
+        btn.className = bloomEnabled ? 'active' : '';
+    }
+
+    // ===================== 预设参数 =====================
+
+    function applyPreset(preset) {
+        setSlider('sldR', preset.r);
+        setSlider('sldG', preset.g);
+        setSlider('sldB', preset.b);
+        setSlider('sldAlpha', preset.alpha);
+        setSlider('sldThreshold', preset.threshold);
+        setSlider('sldIntensity', preset.intensity);
+        setSlider('sldRadius', preset.radius);
+        setSlider('sldSigma', preset.sigma);
+        setSlider('sldWideIntensity', preset.wideIntensity);
+        setSlider('sldWideRadius', preset.wideRadius);
+        setSlider('sldOutline', preset.outlineStrength);
+
+        document.getElementById('chkWideBloom').checked = preset.wideEnabled;
+        document.getElementById('chkOutline').checked = preset.outlineEnabled;
+
+        if (bloomEnabled) {
+            updateModelAppearance();
+            updateWideBloomVisibility();
+            updateOutlineVisibility();
+        }
+    }
+
+    function setSlider(sliderId, value) {
+        var slider = document.getElementById(sliderId);
+        slider.value = value;
+        var valId = controls[sliderId];
+        if (valId) {
+            document.getElementById(valId).textContent = parseFloat(value).toFixed(2);
+        }
+    }
+
+    // ===================== 事件绑定 =====================
+
+    // 所有滑块：实时更新数值显示 + 模型外观
+    Object.keys(controls).forEach(function (sliderId) {
+        var valId = controls[sliderId];
+        document.getElementById(sliderId).addEventListener('input', function () {
+            document.getElementById(valId).textContent = parseFloat(this.value).toFixed(2);
+            // 模型颜色相关的滑块需同步更新图层颜色
+            if (['sldR', 'sldG', 'sldB', 'sldAlpha'].indexOf(sliderId) !== -1 && bloomEnabled) {
+                updateModelAppearance();
+            }
+        });
+    });
+
+    // 泛光总开关
+    document.getElementById('btnToggleBloom').addEventListener('click', function () {
+        if (bloomEnabled) {
+            disableBloom();
+            statusText.textContent = '泛光已关闭';
+        } else {
+            if (sceneLayers.length === 0) {
+                statusText.textContent = '场景尚未加载完成';
+                return;
+            }
+            enableBloom();
+            statusText.textContent = '泛光已开启';
+        }
+    });
+
+    // 复位视角
+    document.getElementById('btnReset').addEventListener('click', function () {
+        if (initialCamera) {
+            scene.camera.flyTo({
+                destination: initialCamera.destination,
+                orientation: initialCamera.orientation,
+                duration: 1.5
+            });
+            statusText.textContent = '已复位视角';
+        }
+    });
+
+    // 宽域泛光开关
+    document.getElementById('chkWideBloom').addEventListener('change', function () {
+        updateWideBloomVisibility();
+    });
+
+    // 轮廓描边开关
+    document.getElementById('chkOutline').addEventListener('change', function () {
+        updateOutlineVisibility();
+    });
+
+    // 预设按钮
+    document.getElementById('btnPreset').addEventListener('click', function () {
+        applyPreset(TARGET_PRESET);
+        statusText.textContent = '已应用匹配目标效果的参数预设';
+    });
+
+    document.getElementById('btnResetParams').addEventListener('click', function () {
+        applyPreset(DEFAULT_PRESET);
+        statusText.textContent = '已重置为默认参数';
+    });
+
+})();
+</script>
+</body>
+</html>
