@@ -1,0 +1,222 @@
+/* ============================================================
+   宜常高铁 · 模型泛光效果 — style.css
+   ============================================================ */
+
+/* ---------- Reset & Layout ---------- */
+html, body, #cesiumContainer {
+    width: 100%; height: 100%; margin: 0; padding: 0;
+    overflow: hidden; background: #000;
+    font-family: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+#app { width: 100%; height: 100%; }
+
+/* ---------- Toolbar ---------- */
+#toolbar {
+    position: absolute; top: 10px; left: 10px; z-index: 1000;
+    background: rgba(20, 24, 32, 0.92);
+    padding: 10px 16px; border-radius: 6px;
+    color: #fff; font-size: 13px;
+    border: 1px solid rgba(100, 200, 255, 0.25);
+    box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+    display: flex; align-items: center; gap: 10px;
+    flex-wrap: wrap;
+}
+#toolbar .title {
+    font-size: 15px; font-weight: 600;
+    background: linear-gradient(90deg, #64d8ff, #a0e8ff);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-right: 6px;
+}
+#toolbar button {
+    padding: 6px 14px;
+    cursor: pointer; background: #2ea8c5;
+    color: #fff; border: none; border-radius: 4px; font-size: 12px;
+    transition: background 0.2s, box-shadow 0.2s;
+}
+#toolbar button:hover { background: #2393ad; }
+
+.btn-small {
+    padding: 4px 10px !important;
+    font-size: 11px !important;
+    background: #475565 !important;
+}
+.btn-small:hover { background: #586878 !important; }
+
+/* 泛光开关按钮 — ON / OFF 双态 */
+.btn-toggle {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-weight: 600; letter-spacing: 0.5px;
+}
+.toggle-dot {
+    display: inline-block;
+    width: 8px; height: 8px; border-radius: 50%;
+    transition: background 0.25s, box-shadow 0.25s;
+}
+.btn-toggle.is-on {
+    background: #1a9e5a !important;
+}
+.btn-toggle.is-on:hover { background: #178a4e !important; }
+.btn-toggle.is-on .toggle-dot {
+    background: #5fff8a;
+    box-shadow: 0 0 6px 1px rgba(95, 255, 138, 0.7);
+}
+.btn-toggle.is-off {
+    background: #555 !important;
+}
+.btn-toggle.is-off:hover { background: #666 !important; }
+.btn-toggle.is-off .toggle-dot {
+    background: #999;
+    box-shadow: none;
+}
+
+/* ---------- 控制面板 ---------- */
+#bloomPanel {
+    position: absolute; top: 10px; right: 10px; z-index: 1000;
+    background: rgba(20, 24, 32, 0.94);
+    padding: 14px 16px; border-radius: 6px;
+    color: #ddd; font-size: 12px;
+    border: 1px solid rgba(100, 200, 255, 0.2);
+    box-shadow: 0 2px 16px rgba(0,0,0,0.5);
+    width: 300px; max-height: 88vh; overflow-y: auto;
+    user-select: none;
+}
+#bloomPanel h4 {
+    margin: 0 0 10px; padding-bottom: 8px;
+    border-bottom: 1px solid rgba(100,200,255,0.2);
+    font-size: 14px; font-weight: 600;
+    background: linear-gradient(90deg, #64d8ff, #a0e8ff);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* 分组 */
+.ctrl-section {
+    margin-bottom: 6px; padding: 6px 0 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.ctrl-title {
+    font-size: 11px; color: #8ab4c8;
+    text-transform: uppercase; letter-spacing: 1px;
+    margin-bottom: 6px; font-weight: 600;
+}
+
+/* 控件行 */
+.ctrl-row {
+    display: flex; align-items: center;
+    margin: 5px 0; gap: 6px;
+}
+.ctrl-row label {
+    display: flex; align-items: center; gap: 5px;
+    cursor: pointer; font-size: 12px;
+}
+.ctrl-label {
+    width: 72px; flex-shrink: 0;
+    font-size: 11px; color: #aac;
+    display: flex; align-items: center; gap: 3px;
+}
+.ctrl-val {
+    width: 38px; text-align: right; flex-shrink: 0;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 11px; color: #7cb8d0;
+}
+.ctrl-row input[type="checkbox"] {
+    accent-color: #2ea8c5;
+    width: 14px; height: 14px;
+}
+
+/* Slider */
+.ctrl-row input[type="range"] {
+    flex: 1; height: 4px;
+    -webkit-appearance: none; appearance: none;
+    background: rgba(100,200,255,0.15); border-radius: 2px;
+    outline: none; cursor: pointer;
+}
+.ctrl-row input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #64d8ff; cursor: pointer;
+    box-shadow: 0 0 4px rgba(100,216,255,0.5);
+}
+.ctrl-row input[type="range"]::-moz-range-thumb {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #64d8ff; cursor: pointer; border: none;
+}
+
+/* ---------- Tooltip 触发图标 ---------- */
+.ctrl-tip {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: rgba(100,200,255,0.15);
+    color: #64d8ff; font-size: 9px; font-weight: 700;
+    cursor: help; flex-shrink: 0; line-height: 1;
+}
+.ctrl-tip:hover {
+    background: rgba(100,200,255,0.35);
+}
+
+/* ---------- Tooltip 浮层 (JS position:fixed, 不受 overflow 裁剪) ---------- */
+.tooltip-popup {
+    position: fixed;
+    z-index: 9999;
+    background: rgba(8, 12, 18, 0.97);
+    color: #cde;
+    padding: 10px 14px; border-radius: 6px;
+    font-size: 12px; font-weight: 400;
+    white-space: pre-line; line-height: 1.55;
+    width: 250px;
+    border: 1px solid rgba(100,200,255,0.3);
+    box-shadow: 0 6px 24px rgba(0,0,0,0.6);
+    pointer-events: none;
+}
+
+/* ---------- 颜色预览 ---------- */
+.color-preview {
+    width: 22px; height: 22px; border-radius: 4px;
+    border: 1px solid rgba(255,255,255,0.2);
+    flex-shrink: 0; margin-left: 2px;
+    transition: background 0.15s;
+}
+
+/* ---------- 操作按钮 ---------- */
+.ctrl-actions {
+    display: flex; gap: 6px; margin-top: 10px;
+}
+.ctrl-actions button {
+    flex: 1; padding: 7px 10px;
+    cursor: pointer; border: none; border-radius: 4px;
+    font-size: 12px; color: #fff;
+    transition: background 0.2s;
+}
+.ctrl-actions .btn-primary { background: #2ea8c5; }
+.ctrl-actions .btn-primary:hover { background: #2393ad; }
+.ctrl-actions .btn-secondary { background: #555; }
+.ctrl-actions .btn-secondary:hover { background: #666; }
+
+/* ---------- 诊断信息 ---------- */
+.diag-info {
+    margin-top: 8px; padding: 6px 8px;
+    background: rgba(0,0,0,0.3); border-radius: 4px;
+    font-family: 'Consolas', monospace;
+    font-size: 10px; color: #7a9; line-height: 1.6;
+    max-height: 120px; overflow-y: auto;
+    white-space: pre-wrap; word-break: break-all;
+}
+
+/* ---------- 状态栏 ---------- */
+#statusBar {
+    position: absolute; bottom: 0; left: 0; right: 0; z-index: 999;
+    background: rgba(0,0,0,0.75); color: #ccc;
+    padding: 4px 12px; font-size: 12px;
+    display: flex; justify-content: space-between; align-items: center;
+}
+.camera-info {
+    text-align: right; color: #8ab4c8;
+    font-family: 'Consolas', monospace; font-size: 11px;
+}
+
+/* ---------- Scrollbar ---------- */
+#bloomPanel::-webkit-scrollbar,
+.diag-info::-webkit-scrollbar { width: 5px; }
+#bloomPanel::-webkit-scrollbar-thumb,
+.diag-info::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
