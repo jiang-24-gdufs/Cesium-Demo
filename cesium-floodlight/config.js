@@ -17,22 +17,25 @@
     // ==================== 预设 ====================
 
     var PRESETS = {
-        target: {
+          target: {
             colorR: 1,
-            colorG: 0.88,
+            colorG: 0.89,
             colorB: 0.72,
-            alpha: 0.42,
-            ambientBoost: 1.3,
-            threshold: 0.72,
-            intensity: 2.6,
-            radius: 3.5,
-            sigma: 3.2,
-            wideEnabled: false,
-            wideIntensity: 0.15,
-            wideRadius: 0.75,
+            alpha: 0.32,
+            ambientBoost: 1.2,
+        
+            threshold: 0.68,
+            intensity: 1.85,
+            radius: 3.2,
+            sigma: 4.1,
+        
+            wideEnabled: true,
+            wideIntensity: 0.30,
+            wideRadius: 7.0,
+        
             outlineEnabled: false,
             outlineStrength: 0,
-            outlineColor: '#000000',
+            outlineColor: "#000000"
         },
         // defaults: {
         //     colorR: 0.92, colorG: 0.94, colorB: 0.92, alpha: 0.45,
