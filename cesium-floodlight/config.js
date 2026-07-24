@@ -19,23 +19,23 @@
   var PRESETS = {
     target: {
       colorR: 1,
-      colorG: 0.89,
-      colorB: 0.72,
-      alpha: 0.32,
+      colorG: 0.95,
+      colorB: 0.87,
+      alpha: 0.86,
       ambientBoost: 1.2,
 
       threshold: 0.68,
-      intensity: 1.85,
-      radius: 3.2,
-      sigma: 4.1,
+      intensity: 1.8,
+      radius: 3.6,
+      sigma: 4.4,
 
       wideEnabled: true,
-      wideIntensity: 0.30,
-      wideRadius: 7.0,
+      wideIntensity: 0.15,
+      wideRadius: 6.5,
 
-      outlineEnabled: false,
-      outlineStrength: 0,
-      outlineColor: "#000000"
+      outlineEnabled: true,
+      outlineStrength: 0.08,
+      outlineColor: "#FFFFFF"
     },
     // defaults: {
     //     colorR: 0.92, colorG: 0.94, colorB: 0.92, alpha: 0.45,

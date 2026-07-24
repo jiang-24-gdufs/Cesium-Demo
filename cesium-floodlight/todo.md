@@ -106,3 +106,8 @@ floodlight.html:1 [.WebGL-0x58cc0010f200] GL_INVALID_OPERATION: glDrawElements: 
 
 2. HEX RGB 颜色换算到模型外观参数时会不准确； 可能是由于不同的range导致换算错误
 3. 继续拆分app.js，新增一个js模块保留和调参相关的内容； 把一些常量也拆分出来
+
+---
+1. 给所有的slider都添加一个对应的number-input来作为手动键入的表单元素，即把`.ctrl-val`的span改为number-input
+2. 现在模型的颜色和截图的颜色有偏差，截图中偏暖白，现在场景中的模型偏黄；视角移动时，模型重叠的区域就是偏白，重叠越多越白，然后也越亮
+3. 截图中也是有比较浅白色描边已经修改了target.outlineColor，开启轮廓高亮时会明显对模型很明显，需要额外微调

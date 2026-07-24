@@ -165,35 +165,56 @@
             '}';
     }
 
-    // 轮廓描边：Sobel 边缘检测
-    function buildOutlineShader(strength, edgeR, edgeG, edgeB) {
+    // 模型轮廓描边：对模型软掩膜做 Sobel，而不是对整张场景亮度做 Sobel。
+    // 合成使用受限 screen blend，避免白色描边把半透明重叠区域继续烧白。
+    function buildOutlineShader(
+        strength, edgeR, edgeG, edgeB,
+        threshold, colorR, colorG, colorB
+    ) {
         var str = strength.toFixed(6);
         var eR = (edgeR != null ? edgeR : 0.75).toFixed(6);
         var eG = (edgeG != null ? edgeG : 1.0).toFixed(6);
         var eB = (edgeB != null ? edgeB : 1.0).toFixed(6);
+        var thr = Math.max(0, threshold - 0.12).toFixed(6);
+        var hi = Math.min(1.0, threshold + 0.04).toFixed(6);
+        var marker = [
+            Math.max(colorR, 0.001).toFixed(6),
+            Math.max(colorG, 0.001).toFixed(6),
+            Math.max(colorB, 0.001).toFixed(6),
+        ].join(', ');
         return '' +
             'uniform sampler2D colorTexture;\n' +
+            'uniform sampler2D depthTexture;\n' +
             'varying vec2 v_textureCoordinates;\n' +
-            'float lum(vec2 uv) {\n' +
+            'float modelMask(vec2 uv) {\n' +
             '    vec4 s = texture2D(colorTexture, uv);\n' +
-            '    return dot(s.rgb, vec3(0.2126, 0.7152, 0.0722));\n' +
+            '    float depth = texture2D(depthTexture, uv).r;\n' +
+            '    float notSky = step(0.001, 1.0 - depth);\n' +
+            '    float lum = dot(s.rgb, vec3(0.2126, 0.7152, 0.0722));\n' +
+            '    vec3 marker = normalize(vec3(' + marker + '));\n' +
+            '    float colorDistance = distance(normalize(s.rgb + vec3(0.0001)), marker);\n' +
+            '    float modelColor = 1.0 - smoothstep(0.06, 0.13, colorDistance);\n' +
+            '    float warmMarker = smoothstep(0.035, 0.10, s.r - s.b);\n' +
+            '    return smoothstep(' + thr + ', ' + hi + ', lum) * modelColor * warmMarker * notSky;\n' +
             '}\n' +
             'void main() {\n' +
             '    vec4 src = texture2D(colorTexture, v_textureCoordinates);\n' +
-            '    vec2 ts = 1.5 / czm_viewport.zw;\n' +
-            '    float tl = lum(v_textureCoordinates + vec2(-ts.x,  ts.y));\n' +
-            '    float t  = lum(v_textureCoordinates + vec2(  0.0,  ts.y));\n' +
-            '    float tr = lum(v_textureCoordinates + vec2( ts.x,  ts.y));\n' +
-            '    float l  = lum(v_textureCoordinates + vec2(-ts.x,   0.0));\n' +
-            '    float r  = lum(v_textureCoordinates + vec2( ts.x,   0.0));\n' +
-            '    float bl = lum(v_textureCoordinates + vec2(-ts.x, -ts.y));\n' +
-            '    float b  = lum(v_textureCoordinates + vec2(  0.0, -ts.y));\n' +
-            '    float br = lum(v_textureCoordinates + vec2( ts.x, -ts.y));\n' +
+            '    vec2 ts = 1.0 / czm_viewport.zw;\n' +
+            '    float tl = modelMask(v_textureCoordinates + vec2(-ts.x,  ts.y));\n' +
+            '    float t  = modelMask(v_textureCoordinates + vec2(  0.0,  ts.y));\n' +
+            '    float tr = modelMask(v_textureCoordinates + vec2( ts.x,  ts.y));\n' +
+            '    float l  = modelMask(v_textureCoordinates + vec2(-ts.x,   0.0));\n' +
+            '    float r  = modelMask(v_textureCoordinates + vec2( ts.x,   0.0));\n' +
+            '    float bl = modelMask(v_textureCoordinates + vec2(-ts.x, -ts.y));\n' +
+            '    float b  = modelMask(v_textureCoordinates + vec2(  0.0, -ts.y));\n' +
+            '    float br = modelMask(v_textureCoordinates + vec2( ts.x, -ts.y));\n' +
             '    float gx = (tr + 2.0 * r + br) - (tl + 2.0 * l + bl);\n' +
             '    float gy = (bl + 2.0 * b + br) - (tl + 2.0 * t + tr);\n' +
             '    float edge = clamp(sqrt(gx * gx + gy * gy), 0.0, 1.0);\n' +
             '    vec3 edgeCol = vec3(' + eR + ', ' + eG + ', ' + eB + ');\n' +
-            '    gl_FragColor = vec4(src.rgb + edgeCol * edge * ' + str + ', src.a);\n' +
+            '    vec3 edgeGlow = edgeCol * edge * min(' + str + ', 0.35);\n' +
+            '    vec3 combined = src.rgb + edgeGlow * (vec3(1.0) - src.rgb);\n' +
+            '    gl_FragColor = vec4(combined, src.a);\n' +
             '}';
     }
 
@@ -268,6 +289,12 @@
                     ' G=' + result.g.toFixed(4) +
                     ' B=' + result.b.toFixed(4) +
                     ' → ' + colorInput.value);
+            }
+
+            function clampNumberParam(key, min, max) {
+                var value = Number(params[key]);
+                if (!Number.isFinite(value)) value = min;
+                params[key] = Math.min(max, Math.max(min, value));
             }
 
             // ---- 复制配置 ----
@@ -364,6 +391,7 @@
                     shadows: true,
                     showRenderLoopErrors: false,
                 });
+                window.viewer = viewer;
 
                 viewer.imageryLayers.addImageryProvider(
                     new Cesium.TiandituImageryProvider({
@@ -604,7 +632,11 @@
                 outlineStage = null;
                 var oc = parseColor(params.outlineColor) || { r: 0.75, g: 1.0, b: 1.0 };
                 outlineStage = addStage('outline',
-                    buildOutlineShader(params.outlineStrength, oc.r, oc.g, oc.b));
+                    buildOutlineShader(
+                        params.outlineStrength, oc.r, oc.g, oc.b,
+                        params.threshold,
+                        params.colorR, params.colorG, params.colorB
+                    ));
             }
 
             function removeShaderStages() {
@@ -733,7 +765,10 @@
                             params.alpha, params.ambientBoost];
                 },
                 function () {
-                    if (bloomEnabled.value) applyModelColor();
+                    if (!bloomEnabled.value) return;
+                    applyModelColor();
+                    // 泛光和描边的模型软掩膜都依赖当前模型颜色。
+                    scheduleRebuild();
                 }
             );
 
@@ -799,6 +834,7 @@
                 runExtractDebug: runExtractDebug,
                 diagStages: function () { diagStages(); },
                 applyColorInput: applyColorInput,
+                clampNumberParam: clampNumberParam,
                 copyConfig: copyConfig,
             };
         },

@@ -116,9 +116,32 @@ html, body, #cesiumContainer {
     display: flex; align-items: center; gap: 3px;
 }
 .ctrl-val {
-    width: 38px; text-align: right; flex-shrink: 0;
+    width: 55px; text-align: right; flex-shrink: 0;
     font-family: 'Consolas', 'Courier New', monospace;
     font-size: 11px; color: #7cb8d0;
+}
+.ctrl-number {
+    box-sizing: border-box;
+    height: 23px;
+    padding: 1px 3px;
+    background: rgba(8, 20, 32, 0.72);
+    border: 1px solid rgba(100, 200, 255, 0.24);
+    border-radius: 3px;
+    outline: none;
+    transition: border-color 0.2s, background 0.2s;
+}
+.ctrl-number:hover {
+    border-color: rgba(100, 200, 255, 0.42);
+}
+.ctrl-number:focus {
+    color: #bcecff;
+    background: rgba(12, 30, 46, 0.92);
+    border-color: rgba(100, 216, 255, 0.72);
+}
+.ctrl-number::-webkit-inner-spin-button,
+.ctrl-number::-webkit-outer-spin-button {
+    margin: 0;
+    opacity: 0.55;
 }
 .ctrl-row input[type="checkbox"] {
     accent-color: #2ea8c5;
