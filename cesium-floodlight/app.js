@@ -3,19 +3,20 @@
 // Vue3 Composition API + SuperMap iClient3D for Cesium 11.2.0
 // ============================================================
 //
-// 着色器策略（v4 — LDR headroom 方案）：
+// 着色器策略（v5 — LDR 模型软掩膜方案）：
 //   1. HDR 强制关闭：SuperMap Cesium 11.2.0 PostProcessStage
 //      在 HDR 模式触发 WebGL Feedback Loop。
 //   2. fillForeColor ≤ 1.0 + 半透明 alpha：
 //      在 LDR 帧缓冲中模型像素保留 < 1.0 的 headroom，
 //      使泛光可以叠加可见亮度。RGB > 1.0 被硬件截断为 1.0，
 //      导致 bloom 公式退化为恒等式（bloom 完全不可见）。
-//   3. depthTexture 排除天空像素 — depth ≈ 1.0 不参与提取。
-//   4. smoothstep 过渡带 0.05，阈值可调精度提取。
+//   3. depthTexture 排除天空像素，并以模型填充色的归一化色相距离
+//      构造软掩膜，抑制地形和影像中的高亮区域。
+//   4. 亮度阈值与颜色软掩膜相乘，仅保留高置信度模型像素。
 //   5. 渐近饱和合成: src + (1-exp(-glow))*(1-src)，
 //      glow=0→像素不变, glow→∞→渐近1.0, LDR 安全。
 //   6. isModelLayer 过滤：只对模型图层着色，跳过底图。
-//   7. 双重亮度控制：layer.brightness + ambientLightColor。
+//   7. 仅使用 layer.brightness，绝不修改场景级 ambientLightColor。
 // ============================================================
 
 (function () {
@@ -43,9 +44,14 @@
         '    gl_FragColor = vec4(c.r + 0.35, c.g * 0.7, c.b * 0.7, c.a);\n' +
         '}';
 
-    function buildExtractDebugShader(threshold) {
+    function buildExtractDebugShader(threshold, colorR, colorG, colorB) {
         var thr = threshold.toFixed(6);
-        var hi  = (threshold + 0.05).toFixed(6);
+        var hi  = Math.min(1.0, threshold + 0.08).toFixed(6);
+        var marker = [
+            Math.max(colorR, 0.001).toFixed(6),
+            Math.max(colorG, 0.001).toFixed(6),
+            Math.max(colorB, 0.001).toFixed(6),
+        ].join(', ');
         return '' +
             'uniform sampler2D colorTexture;\n' +
             'uniform sampler2D depthTexture;\n' +
@@ -55,19 +61,28 @@
             '    float depth = texture2D(depthTexture, v_textureCoordinates).r;\n' +
             '    float notSky = step(0.001, 1.0 - depth);\n' +
             '    float lum = dot(src.rgb, vec3(0.2126, 0.7152, 0.0722));\n' +
-            '    float bright = smoothstep(' + thr + ', ' + hi + ', lum) * notSky;\n' +
-            '    gl_FragColor = vec4(vec3(bright), 1.0);\n' +
+            '    vec3 marker = normalize(vec3(' + marker + '));\n' +
+            '    float colorDistance = distance(normalize(src.rgb + vec3(0.0001)), marker);\n' +
+            '    float modelColor = 1.0 - smoothstep(0.06, 0.13, colorDistance);\n' +
+            '    float warmMarker = smoothstep(0.05, 0.12, src.r - src.b);\n' +
+            '    float mask = smoothstep(' + thr + ', ' + hi + ', lum) * modelColor * warmMarker * notSky;\n' +
+            '    gl_FragColor = vec4(vec3(mask), 1.0);\n' +
             '}';
     }
 
     // 主泛光：7×7 高斯核 (49采样), 亮部提取 + 模糊 + 渐近饱和合成
     // combined = src + (1 - exp(-glow)) * (1 - src)
-    function buildBloomShader(threshold, intensity, radius, sigma) {
+    function buildBloomShader(threshold, intensity, radius, sigma, colorR, colorG, colorB) {
         var s2  = (sigma * sigma * 2.0).toFixed(6);
         var thr = threshold.toFixed(6);
-        var hi  = (threshold + 0.05).toFixed(6);
+        var hi  = Math.min(1.0, threshold + 0.08).toFixed(6);
         var rad = radius.toFixed(6);
         var mul = intensity.toFixed(6);
+        var glowColor = [
+            Math.max(colorR, 0.001).toFixed(6),
+            Math.max(colorG, 0.001).toFixed(6),
+            Math.max(colorB, 0.001).toFixed(6),
+        ].join(', ');
         return '' +
             'uniform sampler2D colorTexture;\n' +
             'uniform sampler2D depthTexture;\n' +
@@ -77,6 +92,7 @@
             '    vec2 texel = 1.0 / czm_viewport.zw;\n' +
             '    vec3 bloom = vec3(0.0);\n' +
             '    float wSum = 0.0;\n' +
+            '    vec3 marker = normalize(vec3(' + glowColor + '));\n' +
             '    for (int i = -3; i <= 3; i++) {\n' +
             '        for (int j = -3; j <= 3; j++) {\n' +
             '            vec2 uv = v_textureCoordinates + vec2(float(i), float(j)) * texel * ' + rad + ';\n' +
@@ -84,11 +100,14 @@
             '            float depth = texture2D(depthTexture, uv).r;\n' +
             '            float notSky = step(0.001, 1.0 - depth);\n' +
             '            float lum = dot(s.rgb, vec3(0.2126, 0.7152, 0.0722));\n' +
-            '            float bright = smoothstep(' + thr + ', ' + hi + ', lum) * notSky;\n' +
+            '            float colorDistance = distance(normalize(s.rgb + vec3(0.0001)), marker);\n' +
+            '            float modelColor = 1.0 - smoothstep(0.06, 0.13, colorDistance);\n' +
+            '            float warmMarker = smoothstep(0.05, 0.12, s.r - s.b);\n' +
+            '            float mask = smoothstep(' + thr + ', ' + hi + ', lum) * modelColor * warmMarker * notSky;\n' +
             '            float d2 = float(i * i + j * j);\n' +
             '            float w = exp(-d2 / ' + s2 + ');\n' +
-            '            bloom += s.rgb * bright * w;\n' +
-            '            wSum += bright * w;\n' +
+            '            bloom += vec3(' + glowColor + ') * mask * w;\n' +
+            '            wSum += w;\n' +
             '        }\n' +
             '    }\n' +
             '    if (wSum > 0.0) bloom /= wSum;\n' +
@@ -100,12 +119,17 @@
     }
 
     // 宽域泛光：大步长二次扩散 + 深度排除 + 渐近饱和
-    function buildWideBloomShader(threshold, intensity, radius, sigma) {
+    function buildWideBloomShader(threshold, intensity, radius, sigma, colorR, colorG, colorB) {
         var s2  = ((sigma || 3.0) * (sigma || 3.0) * 2.0).toFixed(6);
         var thr = threshold.toFixed(6);
         var hi  = (threshold + 0.08).toFixed(6);
         var rad = radius.toFixed(6);
         var mul = intensity.toFixed(6);
+        var glowColor = [
+            Math.max(colorR, 0.001).toFixed(6),
+            Math.max(colorG, 0.001).toFixed(6),
+            Math.max(colorB, 0.001).toFixed(6),
+        ].join(', ');
         return '' +
             'uniform sampler2D colorTexture;\n' +
             'uniform sampler2D depthTexture;\n' +
@@ -115,6 +139,7 @@
             '    vec2 texel = 1.0 / czm_viewport.zw;\n' +
             '    vec3 bloom = vec3(0.0);\n' +
             '    float wSum = 0.0;\n' +
+            '    vec3 marker = normalize(vec3(' + glowColor + '));\n' +
             '    for (int i = -3; i <= 3; i++) {\n' +
             '        for (int j = -3; j <= 3; j++) {\n' +
             '            vec2 uv = v_textureCoordinates + vec2(float(i), float(j)) * texel * ' + rad + ';\n' +
@@ -122,11 +147,14 @@
             '            float depth = texture2D(depthTexture, uv).r;\n' +
             '            float notSky = step(0.001, 1.0 - depth);\n' +
             '            float lum = dot(s.rgb, vec3(0.2126, 0.7152, 0.0722));\n' +
-            '            float bright = smoothstep(' + thr + ', ' + hi + ', lum) * notSky;\n' +
+            '            float colorDistance = distance(normalize(s.rgb + vec3(0.0001)), marker);\n' +
+            '            float modelColor = 1.0 - smoothstep(0.06, 0.13, colorDistance);\n' +
+            '            float warmMarker = smoothstep(0.05, 0.12, s.r - s.b);\n' +
+            '            float mask = smoothstep(' + thr + ', ' + hi + ', lum) * modelColor * warmMarker * notSky;\n' +
             '            float d2 = float(i * i + j * j);\n' +
             '            float w = exp(-d2 / ' + s2 + ');\n' +
-            '            bloom += s.rgb * bright * w;\n' +
-            '            wSum += bright * w;\n' +
+            '            bloom += vec3(' + glowColor + ') * mask * w;\n' +
+            '            wSum += w;\n' +
             '        }\n' +
             '    }\n' +
             '    if (wSum > 0.0) bloom /= wSum;\n' +
@@ -206,6 +234,7 @@
             var extractDebugStage = null;
             var rebuildTimer = null;
             var savedAmbient = null;
+            var modelLayerStates = [];
 
             // ---- 计算属性 ----
             var colorPreviewStyle = computed(function () {
@@ -404,6 +433,22 @@
                                 ', ' + props.join(', '));
                         }
 
+                        modelLayerStates = [];
+                        for (var j = 0; j < layers.length; j++) {
+                            var modelLayer = layers[j];
+                            if (!isModelLayer(modelLayer) || !modelLayer.style3D) continue;
+                            modelLayerStates.push({
+                                layer: modelLayer,
+                                fillForeColor: modelLayer.style3D.fillForeColor &&
+                                    modelLayer.style3D.fillForeColor.clone
+                                    ? modelLayer.style3D.fillForeColor.clone()
+                                    : modelLayer.style3D.fillForeColor,
+                                brightness: modelLayer.brightness,
+                                orderIndependentTranslucency:
+                                    modelLayer.orderIndependentTranslucency,
+                            });
+                        }
+
                         initialCamera = {
                             destination: scene.camera.position.clone(),
                             orientation: {
@@ -431,10 +476,15 @@
                 var modelCount = 0;
                 for (var i = 0; i < sceneLayers.length; i++) {
                     var layer = sceneLayers[i];
-                    if (!isModelLayer(layer)) continue;
-                    layer.orderIndependentTranslucency = true;
-                    layer.style3D.fillForeColor = color;
-                    modelCount++;
+                    if (!isModelLayer(layer) || !layer.style3D) continue;
+                    try {
+                        layer.orderIndependentTranslucency = true;
+                        layer.style3D.fillForeColor = color;
+                        modelCount++;
+                    } catch (e) {
+                        log('WARN 模型图层着色失败: ' +
+                            (layer._name || layer.name || i) + ' - ' + e.message);
+                    }
                 }
 
                 applyBrightness();
@@ -464,25 +514,24 @@
                     } catch (_) {}
                 }
 
-                if (scene.lightSource) {
-                    try {
-                        scene.lightSource.ambientLightColor = new Cesium.Color(b, b, b, 1);
-                        applied.push('ambientLight');
-                    } catch (_) {}
-                }
-
                 log('亮度控制: ' + b.toFixed(2) +
                     ' (' + (applied.length ? applied.join('+') : '无可用 API') + ')');
             }
 
             function restoreModelColor() {
-                for (var i = 0; i < sceneLayers.length; i++) {
-                    var layer = sceneLayers[i];
-                    if (!isModelLayer(layer)) continue;
-                    layer.style3D.fillForeColor = new Cesium.Color(1, 1, 1, 1);
-                    layer.orderIndependentTranslucency = false;
+                for (var i = 0; i < modelLayerStates.length; i++) {
+                    var state = modelLayerStates[i];
+                    var layer = state.layer;
                     try {
-                        if ('brightness' in layer) layer.brightness = 1.0;
+                        if (layer.style3D) {
+                            layer.style3D.fillForeColor = state.fillForeColor &&
+                                state.fillForeColor.clone
+                                ? state.fillForeColor.clone()
+                                : state.fillForeColor;
+                        }
+                        layer.orderIndependentTranslucency =
+                            state.orderIndependentTranslucency;
+                        if ('brightness' in layer) layer.brightness = state.brightness;
                     } catch (_) {}
                 }
                 if (scene.lightSource && savedAmbient) {
@@ -526,7 +575,8 @@
 
                 var src = buildBloomShader(
                     params.threshold, params.intensity,
-                    params.radius, params.sigma
+                    params.radius, params.sigma,
+                    params.colorR, params.colorG, params.colorB
                 );
                 bloomStage = addStage('bloom', src);
 
@@ -543,7 +593,8 @@
                     params.threshold * 0.85,
                     params.wideIntensity,
                     params.wideRadius,
-                    params.sigma * 1.5
+                    params.sigma * 1.5,
+                    params.colorR, params.colorG, params.colorB
                 );
                 wideBloomStage = addStage('wide', src);
             }
@@ -617,7 +668,9 @@
                 log('如果全黑 → 模型亮度不足, 请增大"环境光"或降低"亮度阈值"');
                 log('如果全白 → 阈值过低, 请升高"亮度阈值"');
 
-                var src = buildExtractDebugShader(thr);
+                var src = buildExtractDebugShader(
+                    thr, params.colorR, params.colorG, params.colorB
+                );
                 extractDebugStage = addStage('extract_debug', src);
                 if (extractDebugStage) {
                     status.value = '提取调试 ON — 白=捕获 黑=未捕获 (期望桥梁白色)';
