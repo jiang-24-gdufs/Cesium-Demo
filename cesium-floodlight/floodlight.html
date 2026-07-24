@@ -17,7 +17,6 @@
 
     <!-- ===== 工具栏 ===== -->
     <div id="toolbar">
-        <div class="title">宜常高铁 · 模型泛光效果</div>
         <button :class="['btn-toggle', bloomEnabled ? 'is-on' : 'is-off']"
                 @click="toggleBloom">
             <span class="toggle-dot"></span>
@@ -27,6 +26,10 @@
         <button class="btn-small" @click="runTestShader"
                 title="叠加红色色调测试着色器，验证 PostProcessStage 管线是否可用">
             测试着色器
+        </button>
+        <button class="btn-small" @click="runExtractDebug"
+                title="亮度提取可视化：白色=被阈值捕获 黑色=未捕获，期望桥梁白色、背景黑色">
+            提取调试
         </button>
         <button class="btn-small" @click="diagStages"
                 title="将 PostProcessStages 当前状态输出到诊断日志">
@@ -41,6 +44,16 @@
         <!-- 模型外观 -->
         <div class="ctrl-section">
             <div class="ctrl-title">模型外观</div>
+            <div class="color-input-row">
+                <div class="color-preview color-preview-lg" :style="colorPreviewStyle"></div>
+                <input type="text" class="color-hex-input"
+                       v-model="colorInput"
+                       @change="applyColorInput"
+                       placeholder="#RRGGBB 或 R, G, B">
+                <span class="ctrl-tip"
+                      @mouseenter="showTip($event, '支持 HEX 或 RGB 输入:\n#CBCEC7\n203, 206, 199\nrgb(203, 206, 199)\n回车或失焦后自动解析到 R/G/B 滑块')"
+                      @mouseleave="hideTip()">?</span>
+            </div>
             <div class="ctrl-row" v-for="s in MODEL_SLIDERS" :key="s.key">
                 <span class="ctrl-label">
                     {{ s.label }}
@@ -53,9 +66,6 @@
                        @input="params[s.key] = parseFloat($event.target.value)"
                        :min="s.min" :max="s.max" :step="s.step">
                 <span class="ctrl-val">{{ formatVal(params[s.key]) }}</span>
-                <div v-if="s.key === 'colorR'"
-                     class="color-preview"
-                     :style="colorPreviewStyle"></div>
             </div>
         </div>
 
@@ -129,12 +139,22 @@
                        min="0" max="2" step="0.05">
                 <span class="ctrl-val">{{ formatVal(params.outlineStrength) }}</span>
             </div>
+            <div class="ctrl-row" v-if="params.outlineEnabled">
+                <span class="ctrl-label">描边颜色</span>
+                <input type="text" class="color-hex-input color-hex-sm"
+                       v-model="params.outlineColor"
+                       placeholder="#RRGGBB">
+                <div class="color-preview" :style="outlineColorPreviewStyle"></div>
+            </div>
         </div>
 
         <!-- 操作按钮 -->
         <div class="ctrl-actions">
-            <button class="btn-primary" @click="applyPreset('target')">匹配目标效果</button>
             <button class="btn-secondary" @click="applyPreset('defaults')">重置默认</button>
+        </div>
+        <div class="ctrl-actions">
+            <button class="btn-copy" @click="copyConfig"
+                    title="复制当前所有参数为 JSON 对象到剪贴板">复制配置</button>
         </div>
 
         <!-- 诊断日志 -->
@@ -153,6 +173,7 @@
     </div>
 </div>
 
+<script src="config.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
